@@ -1,0 +1,16 @@
+# AI Service dependencies
+# No pinned versions — pip resolves latest compatible versions
+#
+# IMPORTANT: install numpy and torch first to avoid source compilation:
+#   pip install numpy torch --only-binary=:all:
+# Then:
+#   pip install -r requirements.txt
+
+fastapi
+uvicorn[standard]
+python-multipart
+sentence-transformers
+pdfplumber
+httpx
+pydantic
+numpy
