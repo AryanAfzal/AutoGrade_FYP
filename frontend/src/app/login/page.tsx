@@ -106,8 +106,7 @@ export default function LoginPage() {
           </h1>
           <p className="text-[#9ECDD6] text-base leading-relaxed max-w-sm">
             Automate grading, track learning outcomes, and deliver
-            meaningful feedback — all in one platform built for
-            Pakistani universities.
+            meaningful feedback.
           </p>
 
           {/* Feature pills */}
