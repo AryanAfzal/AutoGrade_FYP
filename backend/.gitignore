@@ -12,7 +12,7 @@ node_modules/
 dist/
 
 # Uploads
-/uploads/
+/uploads
 
 # Logs
 npm-debug.log*
