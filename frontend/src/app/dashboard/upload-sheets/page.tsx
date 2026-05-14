@@ -16,7 +16,7 @@ import {
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import { examApi, uploadApi } from '@/lib/api';
+import { examApi, uploadApi, evaluationApi } from '@/lib/api';
 import type { Exam, AnswerSheet, SheetStatus } from '@/types';
 import { cn, formatDate } from '@/lib/utils';
 
@@ -69,6 +69,7 @@ function UploadSheetsContent() {
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
   const [error, setError] = useState('');
   const [successCount, setSuccessCount] = useState(0);
 
@@ -87,6 +88,20 @@ function UploadSheetsContent() {
       .catch(() => setSheets([]))
       .finally(() => setLoadingSheets(false));
   }, [selectedExamId]);
+
+  // Auto-refresh sheets every 2 seconds if evaluation is in progress
+  useEffect(() => {
+    if (!selectedExamId || !sheets.some(s => s.status === 'processing')) return;
+    
+    const interval = setInterval(() => {
+      uploadApi
+        .getSheets(selectedExamId)
+        .then(setSheets)
+        .catch(() => {});
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [selectedExamId, sheets]);
 
   const handleFiles = async (files: FileList | File[]) => {
     const fileArray = Array.from(files).filter(
@@ -129,7 +144,40 @@ function UploadSheetsContent() {
     if (e.target.files) handleFiles(e.target.files);
   };
 
-  const selectedExam = exams.find((e) => e.id === selectedExamId);
+  const handleTriggerEvaluation = async () => {
+    if (!selectedExamId) return;
+    
+    setEvaluating(true);
+    setError('');
+
+    try {
+      // Trigger evaluation (this will process all uploaded sheets)
+      const results = await evaluationApi.triggerEvaluation(selectedExamId);
+      
+      // Refresh sheets to show updated status
+      const updated = await uploadApi.getSheets(selectedExamId);
+      setSheets(updated);
+
+      const processingCount = updated.filter(
+        (s) => s.status === 'processing' || s.status === 'awaiting_approval'
+      ).length;
+
+      if (processingCount > 0) {
+        setError(''); // Clear error
+        // The auto-refresh will update as evaluation progresses
+      } else {
+        setError('No sheets to evaluate');
+      }
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to start evaluation'
+      );
+    } finally {
+      setEvaluating(false);
+    }
+  };
+
+  const selectedExam = exams.find((e: Exam) => e.id === selectedExamId);
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -288,20 +336,31 @@ function UploadSheetsContent() {
                 ({sheets.length})
               </span>
             </h3>
-            {sheets.some(
-              (s) => s.status === 'awaiting_approval'
-            ) && (
-              <Button
-                size="sm"
-                onClick={() =>
-                  router.push(
-                    `/dashboard/ai-review?examId=${selectedExamId}`
-                  )
-                }
-              >
-                Go to AI Review →
-              </Button>
-            )}
+            <div className="flex gap-2">
+              {sheets.some((s) => s.status === 'uploaded') && (
+                <Button
+                  size="sm"
+                  onClick={handleTriggerEvaluation}
+                  disabled={evaluating}
+                >
+                  {evaluating ? 'Evaluating...' : 'Start Evaluation'}
+                </Button>
+              )}
+              {sheets.some(
+                (s) => s.status === 'awaiting_approval'
+              ) && (
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    router.push(
+                      `/dashboard/ai-review?examId=${selectedExamId}`
+                    )
+                  }
+                >
+                  Go to AI Review →
+                </Button>
+              )}
+            </div>
           </div>
 
           {loadingSheets ? (
@@ -330,7 +389,7 @@ function UploadSheetsContent() {
                   <Card key={sheet.id} padding="sm">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-[#FFF8EB] rounded-lg flex items-center justify-center flex-shrink-0">
+                        <div className="w-9 h-9 bg-[#FFF8EB] rounded-lg flex items-center justify-center shrink-0">
                           <FileText
                             size={16}
                             className="text-[#005461]"
@@ -361,7 +420,7 @@ function UploadSheetsContent() {
                       <div className="mt-3 pt-3 border-t border-[#E8DCC8] flex items-start gap-2">
                         <AlertCircle
                           size={14}
-                          className="text-red-500 mt-0.5 flex-shrink-0"
+                          className="text-red-500 mt-0.5 shrink-0"
                         />
                         <p className="text-xs text-red-600">
                           This sheet was flagged during processing.

@@ -327,7 +327,7 @@ export default function CreateExamPage() {
                 }
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 bg-[#005461] rounded-lg flex items-center justify-center flex-shrink-0">
+                  <div className="w-7 h-7 bg-[#005461] rounded-lg flex items-center justify-center shrink-0">
                     <span className="text-xs text-white font-semibold">
                       {qIndex + 1}
                     </span>
@@ -472,7 +472,7 @@ export default function CreateExamPage() {
                               )
                             }
                             className={cn(
-                              'w-8 h-8 rounded-lg text-xs font-bold flex-shrink-0 transition-all',
+                              'w-8 h-8 rounded-lg text-xs font-bold shrink-0 transition-all',
                               q.correctAnswer === opt.label
                                 ? 'bg-[#FAB963] text-[#1A1A1A]'
                                 : 'bg-[#F5F0E8] text-[#888888] hover:bg-[#E8DCC8]'

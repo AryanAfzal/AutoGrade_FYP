@@ -7,6 +7,11 @@ import { EvaluationService } from './evaluation.service';
 export class EvaluationController {
   constructor(private evaluationService: EvaluationService) {}
 
+  @Post(':examId/trigger')
+  triggerEvaluation(@Param('examId') examId: string) {
+    return this.evaluationService.getResults(examId);
+  }
+
   @Get(':examId')
   getResults(@Param('examId') examId: string) {
     return this.evaluationService.getResults(examId);

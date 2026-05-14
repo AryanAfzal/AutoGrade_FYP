@@ -19,7 +19,7 @@ export class AnswerSheet {
   filePath: string;
 
   @Column({ default: 'uploaded' })
-  status: 'uploaded' | 'mapped' | 'processing' | 'flagged' | 'awaiting_approval' | 'approved';
+  status: 'uploaded' | 'processing' | 'awaiting_approval' | 'approved' | 'flagged' | 'mapped';
 
   @CreateDateColumn()
   uploadedAt: Date;

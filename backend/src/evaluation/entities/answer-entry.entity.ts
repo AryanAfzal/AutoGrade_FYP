@@ -18,7 +18,7 @@ export class AnswerEntry {
   @Column('text')
   studentAnswer: string;
 
-  @Column('text')
+  @Column({ type: 'text', nullable: true })   // ← nullable: referenceAnswer may not exist
   referenceAnswer: string;
 
   @Column('float')

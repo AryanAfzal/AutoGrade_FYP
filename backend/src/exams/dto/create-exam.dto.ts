@@ -12,6 +12,7 @@ export class CreateExamDto {
   @IsString()
   term: string;
 
+  @Type(() => Number)
   @IsNumber()
   totalMarks: number;
 

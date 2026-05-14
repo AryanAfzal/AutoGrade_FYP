@@ -1,4 +1,5 @@
 import { IsString, IsNumber, IsOptional, IsArray } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateQuestionDto {
   @IsString()
@@ -7,6 +8,7 @@ export class CreateQuestionDto {
   @IsString()
   questionText: string;
 
+  @Type(() => Number)
   @IsNumber()
   maxMarks: number;
 

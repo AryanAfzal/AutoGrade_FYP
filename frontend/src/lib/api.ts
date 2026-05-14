@@ -111,6 +111,14 @@ export const uploadApi = {
 
 // ─── EVALUATION ───────────────────────────────────────────
 export const evaluationApi = {
+  triggerEvaluation: async (examId: string) => {
+    const res = await fetch(`${BASE_URL}/evaluation/${examId}/trigger`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').StudentResult[]>(res);
+  },
+
   getResults: async (examId: string) => {
     const res = await fetch(`${BASE_URL}/evaluation/${examId}`, {
       headers: authHeaders(),

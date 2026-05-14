@@ -46,12 +46,21 @@ function AIReviewContent() {
     Promise.all([
       examApi.getById(examId).catch(() => null),
       evaluationApi.getResults(examId).catch(() => []),
-      evaluationApi.getSimilarityFlags(examId).catch(() => []),
+      evaluationApi.getSimilarityFlags(examId).catch(() => null),
     ])
       .then(([examData, resultsData, similarityData]) => {
         setExam(examData);
         setResults(resultsData.filter((r) => r.status === 'awaiting_approval'));
-        setSimilarities(similarityData);
+        
+        // Handle similarity data - backend returns { examId, summary, flaggedPairs }
+        // Extract flaggedPairs array or default to empty array
+        if (Array.isArray(similarityData)) {
+          setSimilarities(similarityData);
+        } else if (similarityData && Array.isArray(similarityData.flaggedPairs)) {
+          setSimilarities(similarityData.flaggedPairs);
+        } else {
+          setSimilarities([]);
+        }
       })
       .catch(() => setError('Failed to load review data'))
       .finally(() => setLoading(false));

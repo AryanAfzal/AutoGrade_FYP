@@ -121,7 +121,7 @@ export default function LoginPage() {
                 key={feature}
                 className="flex items-center gap-3"
               >
-                <div className="w-2 h-2 rounded-full bg-[#FAB963] flex-shrink-0" />
+                <div className="w-2 h-2 rounded-full bg-[#FAB963] shrink-0" />
                 <span className="text-[#C8E6EA] text-sm">{feature}</span>
               </div>
             ))}

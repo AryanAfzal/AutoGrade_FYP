@@ -74,7 +74,7 @@ def evaluate_descriptive(
 
     Returns AnswerEntry-shaped dict.
     """
-    # Edge case: blank answer
+    # Edge case: blank student answer
     if not student_answer or not student_answer.strip():
         return {
             "aiMark":        0.0,
@@ -87,8 +87,23 @@ def evaluate_descriptive(
             "type":          "descriptive",
         }
 
+    # Edge case: no reference answer — score by keywords only
+    if not reference_answer or not reference_answer.strip():
+        keyword_score = _keyword_overlap(student_answer, keywords)
+        ai_mark = round(keyword_score * max_marks, 2)
+        return {
+            "aiMark":        ai_mark,
+            "maxMarks":      max_marks,
+            "confidence":    keyword_score,
+            "semanticScore": 0.0,
+            "keywordScore":  round(keyword_score, 4),
+            "isCorrect":     None,
+            "isFlagged":     keyword_score < LOW_CONFIDENCE_THR,
+            "type":          "descriptive",
+        }
+
     # ── Step 1 & 2: SBERT semantic similarity ─────────────────────────────
-    embeddings = encode([student_answer, reference_answer])
+    embeddings = encode([str(student_answer), str(reference_answer)])
     semantic_score = cosine_similarity(embeddings[0], embeddings[1])
     # Clamp to [0, 1] — cosine can be very slightly negative for unrelated text
     semantic_score = max(0.0, min(1.0, semantic_score))
