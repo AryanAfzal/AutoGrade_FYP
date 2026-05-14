@@ -1,42 +1,14 @@
-"""
-evaluator.py
-------------
-Core scoring logic. Called by the /evaluate router.
-
-For each question in an exam:
-  - MCQ:         exact match → full marks or 0. No SBERT needed.
-  - Descriptive: SBERT semantic score + keyword overlap → weighted final mark.
-
-Scoring formula (weights are configurable per exam in future; defaults here):
-    semantic_weight  = 0.70
-    keyword_weight   = 0.30
-
-    combined_score   = (semantic × 0.70) + (keyword × 0.30)   ← 0..1
-    ai_mark          = combined_score × max_marks
-    confidence       = semantic_score   ← direct cosine similarity 0..1
-
-The confidence column in AnswerEntry is the raw cosine similarity.
-It tells the teacher "how sure is the AI about this score".
-Low confidence (<0.4) answers should be flagged for manual review.
-"""
-
 import re
 from models.sbert_loader import encode, cosine_similarity
 
 # ── Tunable thresholds ────────────────────────────────────────────────────────
 SEMANTIC_WEIGHT    = 0.70
 KEYWORD_WEIGHT     = 0.30
-LOW_CONFIDENCE_THR = 0.40   # answers below this get isFlagged=True
+LOW_CONFIDENCE_THR = 0.40
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def evaluate_mcq(student_answer: str, correct_answer: str, max_marks: int) -> dict:
-    """
-    MCQ evaluation: normalised exact match.
-    Strips whitespace, lowercases, compares.
-
-    Returns AnswerEntry-shaped dict.
-    """
     sa = student_answer.strip().lower()
     ca = correct_answer.strip().lower()
 
@@ -62,18 +34,6 @@ def evaluate_descriptive(
     keywords: list[str],
     max_marks: int,
 ) -> dict:
-    """
-    Descriptive evaluation using SBERT + keyword overlap.
-
-    Steps:
-      1. Encode student answer and reference answer with SBERT.
-      2. Cosine similarity → semantic_score (0..1).
-      3. Keyword overlap ratio → keyword_score (0..1).
-      4. Weighted combination → combined_score → ai_mark.
-      5. Flag if confidence below threshold.
-
-    Returns AnswerEntry-shaped dict.
-    """
     # Edge case: blank student answer
     if not student_answer or not student_answer.strip():
         return {
@@ -135,25 +95,6 @@ def evaluate_answer_sheet(
     student_answers: list[dict],   # [{questionNumber, answerText}]
     exam_questions: list[dict],    # question entities from NestJS / DB
 ) -> dict:
-    """
-    Run evaluation for one student's full answer sheet.
-
-    Matches student answers to exam questions by index order (Q1→Q1, Q2→Q2).
-    Returns the full result object that NestJS saves as StudentResult.
-
-    Args:
-        student_answers:  output of pdf_parser.extract_answers_from_sheet()
-        exam_questions:   list of question dicts with fields:
-                            id, type, questionText, maxMarks, clo,
-                            correctAnswer, referenceAnswer, keywords
-
-    Returns:
-        {
-          totalMark: float,
-          totalMaxMarks: int,
-          entries: [ AnswerEntry-shaped dicts ... ]
-        }
-    """
     # Build a lookup: questionNumber → answerText
     answer_map: dict[int, str] = {
         a["questionNumber"]: a["answerText"]
@@ -205,13 +146,6 @@ def evaluate_answer_sheet(
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _keyword_overlap(student_answer: str, keywords: list[str]) -> float:
-    """
-    Fraction of expected keywords found in the student's answer.
-    Case-insensitive, whole-word match.
-
-    Returns 0.0 if no keywords defined (avoids penalising when teacher
-    didn't enter keywords — falls back to pure semantic scoring).
-    """
     if not keywords:
         return 1.0   # no keywords → don't penalise; let semantic carry it
 

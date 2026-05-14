@@ -1,26 +1,3 @@
-"""
-similarity.py
--------------
-Cross-student answer similarity detection using SBERT.
-
-How it works:
-  For each question in an exam:
-    1. Collect all students' answers for that question.
-    2. Encode them ALL in one batch (efficient — one SBERT call per question).
-    3. Compute full N×N cosine similarity matrix via matrix multiply.
-    4. Flag any pair (i, j) where similarity >= threshold.
-
-Why per-question and not per-sheet:
-  A student who copied only Q3 won't show up in a full-sheet comparison.
-  Per-question gives precise flagging.
-
-Threshold guide:
-  >= 0.97  → almost certainly copy-paste
-  >= 0.92  → very high similarity, likely copying
-  >= 0.85  → suspicious, may be paraphrasing with same ideas
-  Default: 0.92 (strict enough to avoid false positives on short answers)
-"""
-
 import numpy as np
 from models.sbert_loader import encode, pairwise_similarity_matrix
 
@@ -32,40 +9,6 @@ def detect_similarity(
     all_student_answers: list[dict],
     threshold: float = SIMILARITY_THRESHOLD,
 ) -> list[dict]:
-    """
-    Detect suspiciously similar answers across all students for an exam.
-
-    Args:
-        exam_questions:
-            List of question dicts (id, questionText, type, maxMarks).
-            Only descriptive questions are checked — MCQ similarity is meaningless.
-
-        all_student_answers:
-            List of per-student answer sets. Each entry:
-            {
-              studentName:    str,
-              registrationNo: str,
-              answersheetId:  str,
-              answers:        [ {questionNumber: int, answerText: str} ]
-            }
-
-        threshold:
-            Cosine similarity above which a pair is flagged.
-
-    Returns:
-        List of flagged pairs:
-        [
-          {
-            questionId:      str,
-            questionText:    str,
-            questionNumber:  int,
-            studentA: { name, regNo, answersheetId, answerText },
-            studentB: { name, regNo, answersheetId, answerText },
-            similarityScore: float   (0..1)
-          },
-          ...
-        ]
-    """
     if len(all_student_answers) < 2:
         return []   # can't compare with only 1 student
 

@@ -1,36 +1,3 @@
-"""
-pdf_parser.py
--------------
-All pdfplumber-based extraction.
-
-Two responsibilities:
-  1. extract_student_info(file_path)
-       → reads top portion of an answer sheet PDF
-       → returns { studentName, registrationNo }
-
-  2. parse_exam_pdf(file_path)
-       → reads a structured exam / answer-key PDF
-       → returns list of question dicts matching CreateQuestionDto shape
-
-Assumptions about PDF layout (adjust regexes to match your actual PDFs):
-  - Answer sheets have lines like:
-        "Name: Muhammad Ali"
-        "Reg No: 2021-CS-001"
-    in the first page, top half.
-  - Exam PDFs have questions formatted like:
-        "Q1. [MCQ] (2 marks) [CLO1]"
-        "What is the time complexity of binary search?"
-        "Correct Answer: B"
-        -- or --
-        "Q2. [Descriptive] (5 marks) [CLO2]"
-        "Explain the concept of recursion."
-        "Reference Answer: A function that calls itself..."
-        "Keywords: base case, call stack, recursive case"
-"""
-"""
-pdf_parser.py
-"""
-
 import re
 import pdfplumber
 from typing import Optional

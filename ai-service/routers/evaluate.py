@@ -1,21 +1,3 @@
-"""
-routers/evaluate.py
--------------------
-POST /evaluate
-
-The core endpoint. Called by NestJS evaluation.service.ts for each student's
-answer sheet that hasn't been scored yet.
-
-Flow:
-  1. Receive answersheetId, filePath, examId, and the exam's questions.
-  2. Parse the student's answer sheet PDF → list of {questionNumber, answerText}.
-  3. Run scoring (MCQ exact match / Descriptive SBERT+keywords) per question.
-  4. Return the full result object for NestJS to save as StudentResult + AnswerEntry rows.
-
-NestJS passes the exam questions in the request body to avoid this service
-needing DB access. The backend already has them loaded.
-"""
-
 import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -24,9 +6,6 @@ from services.pdf_parser import extract_answers_from_sheet
 from services.evaluator import evaluate_answer_sheet
 
 router = APIRouter()
-
-
-# ── Request / Response models ─────────────────────────────────────────────────
 
 class QuestionPayload(BaseModel):
     id:              str
@@ -46,37 +25,9 @@ class EvaluateRequest(BaseModel):
     questions:     list[QuestionPayload]
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.post("/evaluate")
 async def evaluate_endpoint(body: EvaluateRequest):
-    """
-    Score one student's answer sheet against the exam's answer key.
-
-    Returns:
-    {
-      answersheetId: str,
-      totalMark:     float,
-      totalMaxMarks: int,
-      entries: [
-        {
-          questionId:      str,
-          questionText:    str,
-          studentAnswer:   str,
-          referenceAnswer: str,
-          type:            'mcq' | 'descriptive',
-          aiMark:          float,
-          maxMarks:        int,
-          semanticScore:   float,   # 0..1 (0 for MCQ)
-          keywordScore:    float,   # 0..1 (0 for MCQ)
-          confidence:      float,   # 0..1
-          isCorrect:       bool | None,
-          isFlagged:       bool,
-        },
-        ...
-      ]
-    }
-    """
     if not os.path.exists(body.filePath):
         raise HTTPException(
             status_code=404,

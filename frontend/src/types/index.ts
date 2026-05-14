@@ -95,14 +95,31 @@ export interface StudentResult {
 // SIMILARITY
 export type SimilarityStatus = 'review' | 'suspected' | 'critical';
 
+// SIMILARITY
+export interface SimilarityStudent {
+  name:          string;
+  regNo:         string;
+  answersheetId: string;
+  answerText:    string;
+}
+
 export interface SimilarityFlag {
-  id: string;
-  studentA: string;
-  studentB: string;
-  regA: string;
-  regB: string;
-  similarity: number;
-  status: SimilarityStatus;
+  questionId:      string;
+  questionText:    string;
+  questionNumber:  number;
+  studentA:        SimilarityStudent;
+  studentB:        SimilarityStudent;
+  similarityScore: number;
+}
+
+export interface SimilarityReport {
+  examId:   string;
+  summary: {
+    totalFlaggedPairs: number;
+    studentsInvolved:  string[];
+    byQuestion:        { questionId: string; questionText: string; flagCount: number }[];
+  };
+  flaggedPairs: SimilarityFlag[];
 }
 
 // ANALYTICS
