@@ -38,6 +38,19 @@ function AIReviewContent() {
   const [filter, setFilter] = useState<'all' | 'flagged' | 'high-similarity'>('all');
 
   useEffect(() => {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) {
+      router.push('/login');
+      return;
+    }
+
+    const parsed = JSON.parse(rawUser) as { role?: string };
+    if (parsed.role !== 'teacher') {
+      router.push(parsed.role === 'admin' ? '/dashboard/admin' : parsed.role === 'student' ? '/dashboard/student' : '/login');
+    }
+  }, [router]);
+
+  useEffect(() => {
     if (!examId) return;
 
     setLoading(true);

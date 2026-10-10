@@ -73,6 +73,19 @@ function UploadSheetsContent() {
   const [error, setError] = useState('');
   const [successCount, setSuccessCount] = useState(0);
 
+  useEffect(() => {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) {
+      router.push('/login');
+      return;
+    }
+
+    const parsed = JSON.parse(rawUser) as { role?: string };
+    if (parsed.role !== 'teacher') {
+      router.push(parsed.role === 'admin' ? '/dashboard/admin' : parsed.role === 'student' ? '/dashboard/student' : '/login');
+    }
+  }, [router]);
+
   // Load exams
   useEffect(() => {
     examApi.getAll().then(setExams).catch(() => setExams([]));

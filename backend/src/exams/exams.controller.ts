@@ -5,6 +5,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { ExamsService } from './exams.service';
 import { CreateExamDto } from './dto/create-exam.dto';
 import axios from 'axios';
@@ -12,7 +14,8 @@ import * as fs from 'fs';
 import FormData from 'form-data';
 
 @Controller('exams')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('teacher')
 export class ExamsController {
   constructor(private examsService: ExamsService) {}
 
@@ -27,8 +30,8 @@ export class ExamsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.examsService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.examsService.findOne(id, req.user);
   }
 
   @Post('parse-pdf')

@@ -1,14 +1,56 @@
 // AUTH
+export type UserRole = 'teacher' | 'admin' | 'student';
+export type UserAccountStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 export interface User {
   id: string;
   fullName: string;
   email: string;
-  role: 'teacher' | 'admin' | 'student';
+  role: UserRole;
+  status?: UserAccountStatus;
+  course?: string | null;
+  teacherId?: string | null;
+  department?: string | null;
+  qualification?: string | null;
+  assignedSubjects?: string[];
 }
 
 export interface AuthResponse {
   token: string;
   user: User;
+}
+
+export interface RegistrationOption {
+  id: string;
+  fullName: string;
+  email: string;
+  subjects: string[];
+}
+
+export interface TeacherApplication {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  department: string | null;
+  qualification: string | null;
+  status: UserAccountStatus;
+  rejectionReason: string | null;
+  requestedAt: string | null;
+  approvedAt: string | null;
+  assignedSubjects: string[];
+}
+
+export interface RegistrationRequest {
+  id: string;
+  fullName: string;
+  email: string;
+  course: string | null;
+  status: UserAccountStatus;
+  teacherId: string | null;
+  requestedAt: string | null;
+  approvedAt: string | null;
+  rejectionReason: string | null;
 }
 
 // EXAM

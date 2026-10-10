@@ -1,6 +1,5 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+﻿const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-// ─── HELPER ───────────────────────────────────────────────
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('token');
@@ -22,15 +21,113 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-// ─── AUTH ─────────────────────────────────────────────────
 export const authApi = {
-  login: async (email: string, password: string) => {
+  getCurrentUser: async () => {
+    const res = await fetch(`${BASE_URL}/auth/me`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').User>(res);
+  },
+
+  login: async (email: string, password: string, role: 'teacher' | 'admin' | 'student' = 'teacher') => {
     const res = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, role }),
     });
     return handleResponse<{ token: string; user: import('@/types').User }>(res);
+  },
+
+  googleAdminLogin: async (email: string, emailVerified: boolean) => {
+    const res = await fetch(`${BASE_URL}/auth/google-admin-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, emailVerified }),
+    });
+    return handleResponse<{ token: string; user: import('@/types').User }>(res);
+  },
+
+  getRegistrationOptions: async () => {
+    const res = await fetch(`${BASE_URL}/auth/lookup`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<{ teachers: import('@/types').RegistrationOption[]; courses: string[] }>(res);
+  },
+
+  registerStudent: async (payload: {
+    fullName: string;
+    email: string;
+    password: string;
+    course: string;
+    teacherId: string;
+  }) => {
+    const res = await fetch(`${BASE_URL}/auth/register/student`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<{ message: string; user: import('@/types').User }>(res);
+  },
+
+  registerTeacher: async (payload: {
+    fullName: string;
+    email: string;
+    password: string;
+    phone: string;
+    department: string;
+    qualification: string;
+  }) => {
+    const res = await fetch(`${BASE_URL}/auth/register/teacher`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<{ message: string; user: import('@/types').User }>(res);
+  },
+
+  getTeacherApplications: async () => {
+    const res = await fetch(`${BASE_URL}/auth/teacher-applications`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').TeacherApplication[]>(res);
+  },
+
+  updateTeacherApplication: async (
+    id: string,
+    status: 'APPROVED' | 'REJECTED',
+    reason?: string,
+  ) => {
+    const res = await fetch(`${BASE_URL}/auth/teacher-applications/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status, reason }),
+    });
+    return handleResponse<{ message: string; teacher: { id: string; status: string; rejectionReason: string | null } }>(res);
+  },
+
+  assignTeacherSubjects: async (id: string, subjects: string[]) => {
+    const res = await fetch(`${BASE_URL}/auth/teachers/${id}/subjects`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ subjects }),
+    });
+    return handleResponse<{ id: string; fullName: string; assignedSubjects: string[] }>(res);
+  },
+
+  getTeacherRequests: async () => {
+    const res = await fetch(`${BASE_URL}/auth/teacher-requests`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').RegistrationRequest[]>(res);
+  },
+
+  updateTeacherRequest: async (id: string, status: 'APPROVED' | 'REJECTED', reason?: string) => {
+    const res = await fetch(`${BASE_URL}/auth/teacher-requests/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status, reason }),
+    });
+    return handleResponse<{ message: string; user: { id: string; status: string; course: string | null; teacherId: string | null } }>(res);
   },
 
   logout: () => {
@@ -39,7 +136,6 @@ export const authApi = {
   },
 };
 
-// ─── EXAMS ────────────────────────────────────────────────
 export const examApi = {
   create: async (data: {
     title: string;
@@ -85,7 +181,6 @@ export const examApi = {
   },
 };
 
-// ─── UPLOADS ──────────────────────────────────────────────
 export const uploadApi = {
   uploadSheets: async (examId: string, files: File[]) => {
     const formData = new FormData();
@@ -109,7 +204,6 @@ export const uploadApi = {
   },
 };
 
-// ─── EVALUATION ───────────────────────────────────────────
 export const evaluationApi = {
   triggerEvaluation: async (examId: string) => {
     const res = await fetch(`${BASE_URL}/evaluation/${examId}/trigger`, {
@@ -142,7 +236,6 @@ export const evaluationApi = {
   },
 };
 
-// ─── ANALYTICS ────────────────────────────────────────────
 export const analyticsApi = {
   getReport: async (examId: string) => {
     const res = await fetch(`${BASE_URL}/analytics/${examId}`, {

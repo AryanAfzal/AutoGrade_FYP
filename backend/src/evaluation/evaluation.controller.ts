@@ -1,9 +1,12 @@
 import { Controller, Get, Post, Param, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { EvaluationService } from './evaluation.service';
 
 @Controller('evaluation')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('teacher')
 export class EvaluationController {
   constructor(private evaluationService: EvaluationService) {}
 
