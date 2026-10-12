@@ -5,6 +5,7 @@ __pycache__/
 hf_cache/
 model_files/
 venv/
+venv311/
 *.egg-info/
 dist/
 build/
