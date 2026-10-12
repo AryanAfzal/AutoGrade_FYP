@@ -6,6 +6,7 @@ import { AnswerSheet } from '../uploads/entities/answer-sheet.entity';
 import { Exam } from '../exams/entities/exam.entity';           // ← added
 import { EvaluationService } from './evaluation.service';
 import { EvaluationController } from './evaluation.controller';
+import { RolesGuard } from '../auth/guards/roles.guard';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { EvaluationController } from './evaluation.controller';
       Exam,           
     ]),
   ],
-  providers: [EvaluationService],
+  providers: [EvaluationService, RolesGuard],
   controllers: [EvaluationController],
 })
 export class EvaluationModule {}

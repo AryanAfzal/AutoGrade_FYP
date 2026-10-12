@@ -5,10 +5,13 @@ import {
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { UploadsService } from './uploads.service';
 
 @Controller('uploads')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('teacher')
 export class UploadsController {
   constructor(private uploadsService: UploadsService) {}
 

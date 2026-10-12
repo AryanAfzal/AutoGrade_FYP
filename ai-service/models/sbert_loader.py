@@ -1,12 +1,18 @@
+from pathlib import Path
 from sentence_transformers import SentenceTransformer
 import numpy as np
 from numpy.linalg import norm
 
 MODEL_NAME = "all-MiniLM-L6-v2"
+LOCAL_MODEL_DIR = Path(__file__).resolve().parent.parent / "model_files" / MODEL_NAME
 
-print(f"[sbert_loader] Loading model: {MODEL_NAME} ...")
-_model = SentenceTransformer(MODEL_NAME)
-print(f"[sbert_loader] Model ready.")
+if LOCAL_MODEL_DIR.exists():
+    print(f"[sbert_loader] Loading local model: {LOCAL_MODEL_DIR}")
+    _model = SentenceTransformer(str(LOCAL_MODEL_DIR), local_files_only=True)
+else:
+    print(f"[sbert_loader] Local model not found, downloading {MODEL_NAME} ...")
+    _model = SentenceTransformer(MODEL_NAME)
+print("[sbert_loader] Model ready.")
 
 
 def encode(texts: list[str]) -> np.ndarray:

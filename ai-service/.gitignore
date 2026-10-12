@@ -3,7 +3,9 @@ __pycache__/
 *.pyc
 .venv
 hf_cache/
+model_files/
 venv/
+venv311/
 *.egg-info/
 dist/
 build/
