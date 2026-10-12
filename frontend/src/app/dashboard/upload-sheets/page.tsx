@@ -165,22 +165,17 @@ function UploadSheetsContent() {
 
     try {
       // Trigger evaluation (this will process all uploaded sheets)
-      const results = await evaluationApi.triggerEvaluation(selectedExamId);
+      const evaluation = await evaluationApi.triggerEvaluation(selectedExamId);
       
       // Refresh sheets to show updated status
       const updated = await uploadApi.getSheets(selectedExamId);
       setSheets(updated);
 
-      const processingCount = updated.filter(
-        (s) => s.status === 'processing' || s.status === 'awaiting_approval'
-      ).length;
-
-      if (processingCount > 0) {
-        setError(''); // Clear error
-        // The auto-refresh will update as evaluation progresses
-      } else {
-        setError('No sheets to evaluate');
-      }
+      setError(
+        evaluation.started
+          ? ''
+          : evaluation.message || 'No sheets to evaluate',
+      );
     } catch (err: unknown) {
       setError(
         err instanceof Error ? err.message : 'Failed to start evaluation'

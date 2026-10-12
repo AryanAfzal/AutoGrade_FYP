@@ -152,6 +152,11 @@ export class AuthService {
     teacherId: string;
   }) {
     const normalizedEmail = this.normalizeEmail(data.email);
+    if (this.isAuthorizedAdmin(normalizedEmail)) {
+      throw new BadRequestException(
+        'This email is reserved for an administrator account.',
+      );
+    }
     const existingUser = await this.usersService.findByEmail(normalizedEmail);
     if (existingUser) {
       throw new UnauthorizedException('An account or pending request already exists for this email.');
@@ -201,6 +206,11 @@ export class AuthService {
     qualification: string;
   }) {
     const normalizedEmail = this.normalizeEmail(data.email);
+    if (this.isAuthorizedAdmin(normalizedEmail)) {
+      throw new BadRequestException(
+        'This email is reserved for an administrator account.',
+      );
+    }
     const existingUser = await this.usersService.findByEmail(normalizedEmail);
     if (existingUser) {
       throw new BadRequestException('An account or application already exists for this email.');

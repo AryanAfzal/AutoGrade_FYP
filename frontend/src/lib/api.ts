@@ -210,7 +210,11 @@ export const evaluationApi = {
       method: 'POST',
       headers: authHeaders(),
     });
-    return handleResponse<import('@/types').StudentResult[]>(res);
+    return handleResponse<{
+      started: boolean;
+      queuedSheets: number;
+      message: string;
+    }>(res);
   },
 
   getResults: async (examId: string) => {

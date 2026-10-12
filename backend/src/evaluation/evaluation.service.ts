@@ -1,14 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { StudentResult } from './entities/student-result.entity';
 import { AnswerSheet } from '../uploads/entities/answer-sheet.entity';
 import { Exam } from '../exams/entities/exam.entity';
-import axios from 'axios';
+import axios, { AxiosError, isAxiosError } from 'axios';
+import { existsSync } from 'node:fs';
+
+export interface EvaluationJobStartResult {
+  started: boolean;
+  queuedSheets: number;
+  message: string;
+}
 
 @Injectable()
 export class EvaluationService {
   private readonly logger = new Logger(EvaluationService.name);
+  private readonly activeEvaluations = new Set<string>();
 
   constructor(
     @InjectRepository(StudentResult)
@@ -22,114 +30,172 @@ export class EvaluationService {
   ) {}
 
   async getResults(examId: string) {
-    // Load exam with questions once
-    const exam = await this.examRepo.findOne({
-      where: { id: examId },
-      relations: ['questions'],
+    const results = await this.resultRepo.find({
+      where: { answerSheet: { exam: { id: examId } } },
+      relations: ['entries', 'answerSheet'],
+      order: { answerSheet: { uploadedAt: 'DESC' } },
     });
 
-    if (!exam) {
-      throw new Error(`Exam ${examId} not found`);
+    return results.map((result) => ({
+      answersheetId: result.answerSheet.id,
+      studentName: result.answerSheet.studentName,
+      registrationNo: result.answerSheet.registrationNo,
+      totalAiMark: result.totalAiMark,
+      totalMaxMarks: result.totalMaxMarks,
+      status: result.status,
+      entries: result.entries,
+    }));
+  }
+
+  async triggerEvaluation(examId: string): Promise<EvaluationJobStartResult> {
+    if (this.activeEvaluations.has(examId)) {
+      return {
+        started: false,
+        queuedSheets: 0,
+        message: 'Evaluation is already running for this exam.',
+      };
     }
 
-    // Get sheets that haven't been evaluated yet (status = 'uploaded')
-    // or get all sheets if called for review
-    const sheets = await this.sheetRepo.find({
-      where: { exam: { id: examId } },
-    });
-
-    const results = [];
-
-    for (const sheet of sheets) {
-      // Check if already evaluated
-      let result = await this.resultRepo.findOne({
-        where: { answerSheet: { id: sheet.id } },
-        relations: ['entries', 'answerSheet'],
+    this.activeEvaluations.add(examId);
+    try {
+      const exam = await this.examRepo.findOne({
+        where: { id: examId },
+        relations: ['questions'],
       });
+      if (!exam) {
+        throw new Error(`Exam ${examId} not found`);
+      }
 
-      // If not evaluated yet, evaluate it
-      if (!result && sheet.status === 'uploaded') {
-        try {
-          // Update status to processing
-          await this.sheetRepo.update(sheet.id, { status: 'processing' });
+      const candidates = await this.sheetRepo.find({
+        where: {
+          exam: { id: examId },
+          status: In(['uploaded', 'flagged', 'processing']),
+        },
+        order: { uploadedAt: 'ASC' },
+      });
+      const sheets = (
+        await Promise.all(
+          candidates.map(async (sheet) => {
+            const existingResult = await this.resultRepo.findOne({
+              where: { answerSheet: { id: sheet.id } },
+              select: { id: true },
+            });
+            return existingResult ? null : sheet;
+          }),
+        )
+      ).filter((sheet): sheet is AnswerSheet => sheet !== null);
 
-          // Call AI service
-          const aiResponse = await axios.post(
-            `${process.env.AI_SERVICE_URL}/evaluate`,
-            {
-              answersheetId: sheet.id,
-              filePath: sheet.filePath,
-              examId: examId,
-              questions: exam.questions,
-            },
-            { timeout: 60000 }, // 60s timeout for AI evaluation
-          );
-
-          const { totalMark, totalMaxMarks, entries } = aiResponse.data;
-
-          // Create student result
-          result = this.resultRepo.create({
-            answerSheet: sheet,
-            totalAiMark: totalMark,
-            totalMaxMarks: totalMaxMarks,
-            status: 'awaiting_approval',
-            entries: entries,
-          });
-          result = await this.resultRepo.save(result);
-
-          // Reload with relations
-          result = await this.resultRepo.findOne({
-            where: { id: result.id },
-            relations: ['entries', 'answerSheet'],
-          });
-
-          // Update answer sheet status to awaiting approval
-          await this.sheetRepo.update(sheet.id, {
-            status: 'awaiting_approval',
-          });
-
-          this.logger.log(
-            `Evaluated sheet ${sheet.id} - Score: ${totalMark}/${totalMaxMarks}`,
-          );
-
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.error(
-            `AI evaluation failed for sheet ${sheet.id}: ${message}`,
-          );
-
-          // Update status to flagged (needs manual review)
+      const availableSheets: AnswerSheet[] = [];
+      for (const sheet of sheets) {
+        if (!existsSync(sheet.filePath)) {
           await this.sheetRepo.update(sheet.id, { status: 'flagged' });
-
-          results.push({
-            answersheetId: sheet.id,
-            studentName: sheet.studentName,
-            registrationNo: sheet.registrationNo,
-            totalAiMark: 0,
-            totalMaxMarks: exam.totalMarks,
-            status: 'error',
-            entries: [],
-            error: `AI evaluation failed: ${message}`,
-          });
+          this.logger.error(
+            `Cannot evaluate sheet ${sheet.id}: source PDF is missing at ${sheet.filePath}. Re-upload this sheet.`,
+          );
           continue;
         }
+        availableSheets.push(sheet);
       }
 
-      // Return the result
-      if (result) {
-        results.push({
-          answersheetId: sheet.id,
-          studentName: sheet.studentName,
-          registrationNo: sheet.registrationNo,
-          totalAiMark: result.totalAiMark,
-          totalMaxMarks: result.totalMaxMarks,
-          status: result.status,
-          entries: result.entries,
+      if (!availableSheets.length) {
+        this.activeEvaluations.delete(examId);
+        return {
+          started: false,
+          queuedSheets: 0,
+          message: sheets.length
+            ? 'No source PDFs are available. Re-upload the flagged sheets.'
+            : 'There are no unevaluated sheets to process.',
+        };
+      }
+
+      await Promise.all(
+        availableSheets.map((sheet) =>
+          this.sheetRepo.update(sheet.id, { status: 'processing' }),
+        ),
+      );
+
+      this.logger.log(
+        `Started evaluation for exam ${examId}: ${availableSheets.length} sheet(s).`,
+      );
+      void this.processEvaluationSheets(exam, availableSheets)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Evaluation worker failed for exam ${examId}: ${message}`,
+          );
+        })
+        .finally(() => this.activeEvaluations.delete(examId));
+
+      return {
+        started: true,
+        queuedSheets: sheets.length,
+        message: 'Evaluation started. Sheet statuses will update as each finishes.',
+      };
+    } catch (error) {
+      this.activeEvaluations.delete(examId);
+      throw error;
+    }
+  }
+
+  private async processEvaluationSheets(exam: Exam, sheets: AnswerSheet[]) {
+    for (const sheet of sheets) {
+      const startedAt = Date.now();
+      try {
+        const aiResponse = await axios.post(
+          `${process.env.AI_SERVICE_URL}/evaluate`,
+          {
+            answersheetId: sheet.id,
+            filePath: sheet.filePath,
+            examId: exam.id,
+            questions: exam.questions,
+          },
+          { timeout: 300000 },
+        );
+
+        const { totalMark, totalMaxMarks, entries } = aiResponse.data;
+        const result = this.resultRepo.create({
+          answerSheet: sheet,
+          totalAiMark: totalMark,
+          totalMaxMarks,
+          status: 'awaiting_approval',
+          entries,
         });
+        await this.resultRepo.save(result);
+        await this.sheetRepo.update(sheet.id, { status: 'awaiting_approval' });
+
+        this.logger.log(
+          `Evaluated sheet ${sheet.id} - Score: ${totalMark}/${totalMaxMarks} in ${Math.round((Date.now() - startedAt) / 1000)}s.`,
+        );
+      } catch (error: unknown) {
+        const message = isAxiosError(error)
+          ? this.formatAiServiceError(error)
+          : error instanceof Error
+            ? error.message
+            : String(error);
+        this.logger.error(
+          `AI evaluation failed for sheet ${sheet.id} after ${Math.round((Date.now() - startedAt) / 1000)}s: ${message}`,
+        );
+        await this.sheetRepo.update(sheet.id, { status: 'flagged' });
       }
     }
+  }
 
-    return results;
+  private formatAiServiceError(error: AxiosError): string {
+    const status = error.response?.status ?? 'no response';
+    const responseBody = error.response?.data;
+    const detail =
+      responseBody &&
+      typeof responseBody === 'object' &&
+      'detail' in responseBody
+        ? responseBody.detail
+        : responseBody;
+    const responseMessage =
+      typeof detail === 'string'
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : error.message;
+    return `HTTP ${status}${error.code ? ` (${error.code})` : ''}: ${responseMessage}`;
   }
 
   // ── getSimilarityFlags ────────────────────────────────────────────────────

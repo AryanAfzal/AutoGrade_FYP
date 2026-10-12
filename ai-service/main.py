@@ -1,6 +1,9 @@
 import os
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 # Routers
 from routers.extract    import router as extract_router
