@@ -2,7 +2,7 @@
 
 import { Suspense } from 'react';
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   BarChart3,
   Download,
@@ -22,6 +22,7 @@ import type { AnalyticsReport, Exam } from '@/types';
 import { cn } from '@/lib/utils';
 
 function AnalyticsContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [exams, setExams] = useState<Exam[]>([]);
@@ -32,6 +33,19 @@ function AnalyticsContent() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) {
+      router.push('/login');
+      return;
+    }
+
+    const parsed = JSON.parse(rawUser) as { role?: string };
+    if (parsed.role !== 'teacher') {
+      router.push(parsed.role === 'admin' ? '/dashboard/admin' : parsed.role === 'student' ? '/dashboard/student' : '/login');
+    }
+  }, [router]);
 
   // Load all exams for the dropdown
   useEffect(() => {

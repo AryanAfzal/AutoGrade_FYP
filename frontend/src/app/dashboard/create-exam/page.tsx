@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
 import {
@@ -15,8 +15,8 @@ import {
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { examApi } from '@/lib/api';
-import type { Question, QuestionType } from '@/types';
+import { authApi, examApi } from '@/lib/api';
+import type { Question, QuestionType, User } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface ExamMetaForm {
@@ -61,6 +61,25 @@ export default function CreateExamPage() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
   const [keywordInput, setKeywordInput] = useState<string[]>(['']);
+  const [assignedSubjects, setAssignedSubjects] = useState<string[]>([]);
+
+  useEffect(() => {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) {
+      router.push('/login');
+      return;
+    }
+
+    const parsed = JSON.parse(rawUser) as User;
+    if (parsed.role !== 'teacher') {
+      router.push(parsed.role === 'admin' ? '/dashboard/admin' : parsed.role === 'student' ? '/dashboard/student' : '/login');
+      return;
+    }
+
+    authApi.getCurrentUser()
+      .then((currentUser) => setAssignedSubjects(currentUser.assignedSubjects || []))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unable to load assigned subjects.'));
+  }, [router]);
 
   const {
     register,
@@ -219,14 +238,22 @@ export default function CreateExamPage() {
                 })}
               />
             </div>
-            <Input
-              label="Course"
-              placeholder="e.g. CS-301"
-              error={errors.course?.message}
-              {...register('course', {
-                required: 'Course is required',
-              })}
-            />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-[#1A1A1A]">Assigned subject</label>
+              <select
+                defaultValue=""
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[#E8DCC8] bg-white text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#005461]"
+                {...register('course', {
+                  required: 'Select a subject assigned to your teacher account',
+                  validate: (value) => assignedSubjects.includes(value) || 'Select a subject assigned to your teacher account',
+                })}
+              >
+                <option value="" disabled>Select a subject</option>
+                {assignedSubjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
+              </select>
+              {errors.course?.message && <p className="text-xs text-red-500">{errors.course.message}</p>}
+              {assignedSubjects.length === 0 && <p className="text-xs text-[#888888]">No subjects are assigned to your account yet.</p>}
+            </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-[#1A1A1A]">
                 Term

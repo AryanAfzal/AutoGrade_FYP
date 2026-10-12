@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -6,13 +6,7 @@ import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import {
-  GraduationCap,
-  Shield,
-  BookOpen,
-  Eye,
-  EyeOff,
-} from 'lucide-react';
+import { GraduationCap, Shield, BookOpen, Eye, EyeOff } from 'lucide-react';
 
 type Role = 'teacher' | 'admin' | 'student';
 
@@ -26,7 +20,6 @@ interface RoleOption {
   label: string;
   description: string;
   icon: React.ReactNode;
-  active: boolean;
 }
 
 const roles: RoleOption[] = [
@@ -35,21 +28,18 @@ const roles: RoleOption[] = [
     label: 'Teacher',
     description: 'Manage exams and review grades',
     icon: <BookOpen size={20} />,
-    active: true,
   },
   {
     role: 'admin',
     label: 'Administrator',
     description: 'Manage users and institution',
     icon: <Shield size={20} />,
-    active: false,
   },
   {
     role: 'student',
     label: 'Student',
     description: 'View results and feedback',
     icon: <GraduationCap size={20} />,
-    active: false,
   },
 ];
 
@@ -70,10 +60,21 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const response = await authApi.login(data.email, data.password);
+      const response = await authApi.login(data.email, data.password, selectedRole);
       localStorage.setItem('token', response.token);
       localStorage.setItem('user', JSON.stringify(response.user));
-      router.push('/dashboard');
+
+      if (response.user.role === 'admin') {
+        router.push('/dashboard/admin');
+        return;
+      }
+
+      if (response.user.role === 'teacher') {
+        router.push('/dashboard/teacher');
+        return;
+      }
+
+      router.push('/dashboard/student');
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
@@ -87,9 +88,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-[#FFF8EB] flex">
-      {/* LEFT PANEL — 60% */}
       <div className="hidden lg:flex lg:w-1/2 bg-[#005461] flex-col justify-between p-12">
-        {/* Logo */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-[#FAB963] rounded-lg flex items-center justify-center">
             <BookOpen size={20} className="text-[#1A1A1A]" />
@@ -97,7 +96,6 @@ export default function LoginPage() {
           <span className="text-white text-xl font-semibold">AutoGrade</span>
         </div>
 
-        {/* Center content */}
         <div className="space-y-6">
           <h1 className="text-4xl font-bold text-white leading-tight">
             AI-Powered<br />
@@ -105,11 +103,9 @@ export default function LoginPage() {
             Evaluation
           </h1>
           <p className="text-[#9ECDD6] text-base leading-relaxed max-w-sm">
-            Automate grading, track learning outcomes, and deliver
-            meaningful feedback.
+            Automate grading, track learning outcomes, and deliver meaningful feedback.
           </p>
 
-          {/* Feature pills */}
           <div className="flex flex-col gap-3 pt-4">
             {[
               'MCQ & Descriptive Answer Evaluation',
@@ -117,10 +113,7 @@ export default function LoginPage() {
               'Academic Integrity Detection',
               'Instant Student Feedback',
             ].map((feature) => (
-              <div
-                key={feature}
-                className="flex items-center gap-3"
-              >
+              <div key={feature} className="flex items-center gap-3">
                 <div className="w-2 h-2 rounded-full bg-[#FAB963] shrink-0" />
                 <span className="text-[#C8E6EA] text-sm">{feature}</span>
               </div>
@@ -128,75 +121,42 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Bottom */}
         <p className="text-[#6BAAB5] text-xs">
           COMSATS University Islamabad, Wah Campus — Session 2023–2026
         </p>
       </div>
 
-      {/* RIGHT PANEL — login form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
         <div className="w-full max-w-md space-y-8">
-
-          {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-3 mb-6">
             <div className="w-9 h-9 bg-[#005461] rounded-lg flex items-center justify-center">
               <BookOpen size={18} className="text-[#FAB963]" />
             </div>
-            <span className="text-[#005461] text-lg font-semibold">
-              AutoGrade
-            </span>
+            <span className="text-[#005461] text-lg font-semibold">AutoGrade</span>
           </div>
 
-          {/* Heading */}
           <div className="space-y-1">
-            <h2 className="text-2xl font-bold text-[#1A1A1A]">
-              Welcome back
-            </h2>
-            <p className="text-sm text-[#888888]">
-              Select your role and sign in to continue
-            </p>
+            <h2 className="text-2xl font-bold text-[#1A1A1A]">Welcome back</h2>
+            <p className="text-sm text-[#888888]">Select your role and sign in to continue</p>
           </div>
 
-          {/* Role selector */}
           <div className="grid grid-cols-3 gap-3">
-            {roles.map(({ role, label, description, icon, active }) => (
+            {roles.map(({ role, label, description, icon }) => (
               <button
                 key={role}
-                onClick={() => active && setSelectedRole(role)}
-                disabled={!active}
-                className={`
-                  relative flex flex-col items-center gap-2 p-3 rounded-xl border-2
-                  text-center transition-all duration-200
-                  ${
-                    !active
-                      ? 'border-[#E8DCC8] bg-[#F5F0E8] opacity-40 cursor-not-allowed'
-                      : selectedRole === role
-                      ? 'border-[#005461] bg-[#005461] text-white shadow-md'
-                      : 'border-[#E8DCC8] bg-white text-[#4A4A4A] hover:border-[#005461] cursor-pointer'
-                  }
-                `}
+                type="button"
+                onClick={() => setSelectedRole(role)}
+                className={`relative flex flex-col items-center gap-2 p-3 rounded-xl border-2 text-center transition-all duration-200 ${
+                  selectedRole === role
+                    ? 'border-[#005461] bg-[#005461] text-white shadow-md'
+                    : 'border-[#E8DCC8] bg-white text-[#4A4A4A] hover:border-[#005461] cursor-pointer'
+                }`}
               >
-                {!active && (
-                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] bg-[#E8DCC8] text-[#888888] px-2 py-0.5 rounded-full whitespace-nowrap">
-                    Soon
-                  </span>
-                )}
-                <span
-                  className={
-                    selectedRole === role && active
-                      ? 'text-[#FAB963]'
-                      : ''
-                  }
-                >
-                  {icon}
-                </span>
+                <span className={selectedRole === role ? 'text-[#FAB963]' : ''}>{icon}</span>
                 <span className="text-xs font-medium">{label}</span>
                 <span
                   className={`text-[10px] leading-tight hidden sm:block ${
-                    selectedRole === role && active
-                      ? 'text-[#C8E6EA]'
-                      : 'text-[#888888]'
+                    selectedRole === role ? 'text-[#C8E6EA]' : 'text-[#888888]'
                   }`}
                 >
                   {description}
@@ -205,7 +165,6 @@ export default function LoginPage() {
             ))}
           </div>
 
-          {/* Form */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <Input
               label="Email Address"
@@ -244,27 +203,47 @@ export default function LoginPage() {
               </button>
             </div>
 
-            {/* Error message */}
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
                 <p className="text-sm text-red-600">{error}</p>
               </div>
             )}
 
-            <Button
-              type="submit"
-              size="lg"
-              loading={loading}
-              className="w-full mt-2"
-            >
+            <Button type="submit" size="lg" loading={loading} className="w-full mt-2">
               Sign in as {roles.find((r) => r.role === selectedRole)?.label}
             </Button>
           </form>
 
-          {/* Footer */}
+          <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-[#888888]">
+            {selectedRole === 'teacher' ? (
+              <>
+                <span>New teacher?</span>
+                <button
+                  type="button"
+                  onClick={() => router.push('/register/teacher')}
+                  className="text-[#005461] font-semibold hover:underline"
+                >
+                  Apply here
+                </button>
+              </>
+            ) : selectedRole === 'student' ? (
+              <>
+                <span>New student?</span>
+                <button
+                  type="button"
+                  onClick={() => router.push('/register/student')}
+                  className="text-[#005461] font-semibold hover:underline"
+                >
+                  Register here
+                </button>
+              </>
+            ) : (
+              <span>Administrator accounts are managed by the institution.</span>
+            )}
+          </div>
+
           <p className="text-center text-xs text-[#888888]">
-            AutoGrade — FYP Project · COMSATS Wah ·{' '}
-            <span className="text-[#005461] font-medium">2023–2026</span>
+            AutoGrade — FYP Project · COMSATS Wah · <span className="text-[#005461] font-medium">2023–2026</span>
           </p>
         </div>
       </div>

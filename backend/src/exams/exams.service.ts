@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Exam } from './entities/exam.entity';
@@ -14,6 +14,10 @@ export class ExamsService {
   ) {}
 
   async create(dto: CreateExamDto, user: User) {
+    if (user.status !== 'APPROVED' || !(user.assignedSubjects || []).includes(dto.course)) {
+      throw new UnauthorizedException('You may create exams only for subjects assigned to your approved teacher account.');
+    }
+
     const exam = this.examRepo.create({
       title: dto.title,
       course: dto.course,
@@ -42,10 +46,14 @@ export class ExamsService {
     });
   }
 
-  findOne(id: string) {
-    return this.examRepo.findOne({
-      where: { id },
+  async findOne(id: string, user: User) {
+    const exam = await this.examRepo.findOne({
+      where: { id, createdBy: { id: user.id } },
       relations: ['questions'],
     });
+    if (!exam) {
+      throw new BadRequestException('Exam not found or you do not have access to it.');
+    }
+    return exam;
   }
 }
