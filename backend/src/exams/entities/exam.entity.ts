@@ -22,6 +22,9 @@ export class Exam {
   @Column({ default: 'draft' })
   status: 'draft' | 'active' | 'under_review' | 'published' | 'closed';
 
+  @Column({ type: 'timestamp', nullable: true })
+  publishedAt: Date | null;
+
   @ManyToOne(() => User)
   createdBy: User;
 

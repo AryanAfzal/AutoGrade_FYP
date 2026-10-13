@@ -9,12 +9,19 @@ import {
   Flag,
   Loader,
   TrendingDown,
+  MessageSquare,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import { evaluationApi, examApi } from '@/lib/api';
-import type { StudentResult, Exam, SimilarityFlag, SimilarityReport } from '@/types';
+import type {
+  AnswerEntry,
+  StudentResult,
+  Exam,
+  SimilarityFlag,
+  SimilarityReport,
+} from '@/types';
 import { cn, getConfidenceLabel } from '@/lib/utils';
 
 const confidenceVariant = (confidence: number): 'default' | 'success' | 'warning' | 'danger' | 'info' | 'amber' => {
@@ -35,6 +42,12 @@ function AIReviewContent() {
   const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [markDrafts, setMarkDrafts] = useState<Record<string, string>>({});
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [reviewingEntryId, setReviewingEntryId] = useState<string | null>(null);
+  const [completingResultId, setCompletingResultId] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'flagged' | 'high-similarity'>('all');
 
   useEffect(() => {
@@ -55,14 +68,20 @@ function AIReviewContent() {
 
     setLoading(true);
     Promise.all([
-      examApi.getById(examId).catch(() => null),
-      evaluationApi.getResults(examId).catch(() => []),
+      examApi.getById(examId),
+      evaluationApi.getResults(examId),
     ])
       .then(([examData, resultsData]) => {
         setExam(examData);
         setResults(resultsData.filter((r) => r.status === 'awaiting_approval'));
       })
-      .catch(() => setError('Failed to load review data'))
+      .catch((loadError: unknown) =>
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Failed to load review data.',
+        ),
+      )
       .finally(() => setLoading(false));
 
     evaluationApi.getSimilarityFlags(examId)
@@ -76,21 +95,119 @@ function AIReviewContent() {
           setSimilarities([]);
         }
       })
-      .catch(() => setSimilarities([]));
+      .catch((similarityError: unknown) =>
+        setError(
+          similarityError instanceof Error
+            ? similarityError.message
+            : 'Failed to load similarity data.',
+        ),
+      );
   }, [examId]);
 
-  const handleApprove = async (studentId: string) => {
+  const handleReviewEntry = async (
+    entry: AnswerEntry,
+    action: 'approve' | 'override',
+  ) => {
+    setError('');
+    setNotice('');
+    let payload: { action: 'approve'; approvalComment?: string } | {
+      action: 'override';
+      mark: number;
+      comment: string;
+    };
+    if (action === 'override') {
+      const mark = Number(markDrafts[entry.id] ?? entry.approvedMark ?? entry.aiMark);
+      const comment = (commentDrafts[entry.id] || '').trim();
+      if (!Number.isFinite(mark) || mark < 0 || mark > entry.maxMarks) {
+        setError(`Enter a revised mark between 0 and ${entry.maxMarks}.`);
+        return;
+      }
+      if (!comment) {
+        setError('A comment is required when overriding an AI-assigned mark.');
+        return;
+      }
+      payload = { action: 'override', mark, comment };
+    } else {
+      payload = { action: 'approve' };
+    }
+
+    setReviewingEntryId(entry.id);
     try {
-      await evaluationApi.publishResults(examId!);
-      setResults((prev) => prev.filter((r) => r.answersheetId !== studentId));
-    } catch {
-      setError('Failed to approve result');
+      await evaluationApi.reviewAnswerEntry(examId!, entry.id, payload);
+      const refreshedResults = await evaluationApi.getResults(examId!);
+      setResults(refreshedResults.filter((result) => result.status === 'awaiting_approval'));
+      setNotice(
+        action === 'approve'
+          ? 'AI mark approved and recorded.'
+          : 'Revised mark saved and recorded.',
+      );
+    } catch (reviewError: unknown) {
+      setError(
+        reviewError instanceof Error
+          ? reviewError.message
+          : 'Unable to record the review decision.',
+      );
+    } finally {
+      setReviewingEntryId(null);
+    }
+  };
+
+  const handlePublish = async () => {
+    if (!examId || !canPublish) return;
+    if (!window.confirm('Publish all papers marked done for this exam to students?')) return;
+    setPublishing(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await evaluationApi.publishResults(examId);
+      const refreshedResults = await evaluationApi.getResults(examId);
+      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
+      setSelectedStudentId(null);
+      if (result.examCompleted) {
+        setExam((current) =>
+          current
+            ? { ...current, status: 'published', publishedAt: result.publishedAt }
+            : current,
+        );
+      }
+      setNotice(`${result.publishedCount} student result(s) published successfully.`);
+    } catch (publishError: unknown) {
+      setError(
+        publishError instanceof Error
+          ? publishError.message
+          : 'Unable to publish results.',
+      );
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleCompleteReview = async (result: StudentResult) => {
+    if (!examId) return;
+    setError('');
+    setNotice('');
+    setCompletingResultId(result.answersheetId);
+    try {
+      await evaluationApi.completeResultReview(examId, result.id);
+      const refreshedResults = await evaluationApi.getResults(examId);
+      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
+      setNotice(`${result.studentName}'s paper is marked done and ready to publish.`);
+    } catch (completeError: unknown) {
+      setError(
+        completeError instanceof Error
+          ? completeError.message
+          : 'Unable to mark this paper done.',
+      );
+    } finally {
+      setCompletingResultId(null);
     }
   };
 
   const selectedStudent = selectedStudentId
     ? results.find((r) => r.answersheetId === selectedStudentId)
     : null;
+
+  const canPublish = results.some((result) => !!result.reviewCompletedAt);
 
   // Check if a student is involved in a high-similarity flag
   const studentHasSimilarity = (studentName: string) =>
@@ -123,10 +240,23 @@ function AIReviewContent() {
     <div className="space-y-6 max-w-6xl">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold text-[#1A1A1A]">AI Review</h2>
-        <p className="text-sm text-[#888888] mt-1">
-          Review AI-evaluated results before publishing · {filteredResults.length} pending
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-[#1A1A1A]">Teacher Review</h2>
+            <p className="text-sm text-[#888888] mt-1">
+              Approve or override each question before publishing · {results.length} submission(s) pending
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            onClick={handlePublish}
+            loading={publishing}
+            disabled={!canPublish || publishing}
+          >
+            <CheckCircle2 size={14} className="mr-2" />
+            Publish done papers ({results.filter((result) => !!result.reviewCompletedAt).length})
+          </Button>
+        </div>
       </div>
 
       {/* Exam info */}
@@ -137,7 +267,14 @@ function AIReviewContent() {
               <p className="text-sm font-semibold text-[#005461] uppercase tracking-wide">{exam.title}</p>
               <p className="text-xs text-[#888888] mt-1">{exam.course} · {exam.term}</p>
             </div>
-            <Badge variant="info">Awaiting Review</Badge>
+            <Badge variant={exam.status === 'published' ? 'success' : 'info'}>
+              {exam.status === 'published' ? 'Published' : 'Awaiting Review'}
+            </Badge>
+            {exam.publishedAt && (
+              <p className="mt-2 text-xs text-[#888888]">
+                Published {new Date(exam.publishedAt).toLocaleString()}
+              </p>
+            )}
           </div>
         </Card>
       )}
@@ -171,6 +308,11 @@ function AIReviewContent() {
           </div>
         </Card>
       )}
+      {notice && (
+        <Card className="border-green-200 bg-green-50">
+          <p role="status" className="text-sm text-green-700">{notice}</p>
+        </Card>
+      )}
 
       {/* Loading */}
       {loading ? (
@@ -186,7 +328,7 @@ function AIReviewContent() {
             <CheckCircle2 size={32} className="text-green-500" />
             <p className="text-sm font-medium text-[#1A1A1A]">All clear!</p>
             <p className="text-xs text-[#888888]">
-              {filter === 'all' && 'No results pending review'}
+              {filter === 'all' && (results.length > 0 ? 'All questions have been reviewed. Publish when ready.' : 'No results pending review')}
               {filter === 'flagged' && 'No flagged answers found'}
               {filter === 'high-similarity' && 'No high similarity matches'}
             </p>
@@ -233,6 +375,17 @@ function AIReviewContent() {
                           </p>
                         </div>
                       </div>
+                      <p className="text-xs text-[#666666]">
+                        {result.entries.filter((entry) => entry.reviewStatus !== 'pending').length}
+                        {' / '}
+                        {result.entries.length} questions reviewed
+                        {result.totalApprovedMark !== null &&
+                          result.totalApprovedMark !== undefined &&
+                          ` · Final ${result.totalApprovedMark}/${result.totalMaxMarks}`}
+                      </p>
+                      {result.reviewCompletedAt && (
+                        <Badge variant="success">Done · ready to publish</Badge>
+                      )}
 
                       {(flaggedCount > 0 || hasSimilarity) && (
                         <div className="flex gap-2 flex-wrap">
@@ -262,9 +415,35 @@ function AIReviewContent() {
             <div className="lg:col-span-2 space-y-4">
               <Card>
                 <div className="space-y-4">
-                  <div>
-                    <h3 className="text-base font-semibold text-[#1A1A1A]">{selectedStudent.studentName}</h3>
-                    <p className="text-sm text-[#888888]">{selectedStudent.registrationNo}</p>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-[#1A1A1A]">{selectedStudent.studentName}</h3>
+                      <p className="text-sm text-[#888888]">{selectedStudent.registrationNo}</p>
+                    </div>
+                    {selectedStudent.reviewCompletedAt ? (
+                      <Badge variant="success">Done · ready to publish</Badge>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => handleCompleteReview(selectedStudent)}
+                        loading={completingResultId === selectedStudent.answersheetId}
+                        disabled={
+                          !!completingResultId ||
+                          selectedStudent.entries.length !== exam?.questions.length ||
+                          selectedStudent.entries.some(
+                            (entry) =>
+                              entry.reviewStatus === 'pending' ||
+                              entry.approvedMark === null ||
+                              entry.approvedMark === undefined,
+                          )
+                        }
+                      >
+                        <CheckCircle2 size={14} className="mr-2" />
+                        Done reviewing this paper
+                      </Button>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-3 gap-3 pt-4 border-t border-[#E8DCC8]">
@@ -302,6 +481,11 @@ function AIReviewContent() {
                           </p>
                           <div className="flex gap-2 mt-2 flex-wrap">
                             <Badge variant="default">{entry.aiMark}/{entry.maxMarks}</Badge>
+                            {entry.reviewStatus !== 'pending' && (
+                              <Badge variant={entry.reviewStatus === 'overridden' ? 'warning' : 'success'}>
+                                {entry.reviewStatus === 'overridden' ? 'Overridden' : 'Approved'} · {entry.approvedMark}/{entry.maxMarks}
+                              </Badge>
+                            )}
                             <Badge variant={confidenceVariant(entry.confidence)}>
                               {getConfidenceLabel(entry.confidence)} - {Math.round(entry.confidence * 100)}%
                             </Badge>
@@ -372,6 +556,95 @@ function AIReviewContent() {
                           <p className="text-sm text-[#1A1A1A]">{entry.feedback}</p>
                         </div>
                       )}
+                      <div className="space-y-3 rounded-lg border border-[#E8DCC8] bg-[#FFFDF8] p-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-[#005461]">
+                            Teacher decision
+                          </p>
+                          <p className="mt-1 text-xs text-[#666666]">
+                            Approve the AI mark or enter a revised mark with a required explanation.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <label className="flex flex-col gap-1 text-xs text-[#666666]">
+                            Revised mark (0–{entry.maxMarks})
+                            <input
+                              type="number"
+                              min="0"
+                              max={entry.maxMarks}
+                              step="0.01"
+                              value={
+                                markDrafts[entry.id] ??
+                                String(entry.approvedMark ?? entry.aiMark)
+                              }
+                              onChange={(event) =>
+                                setMarkDrafts((current) => ({
+                                  ...current,
+                                  [entry.id]: event.target.value,
+                                }))
+                              }
+                              className="rounded-lg border border-[#E8DCC8] bg-white px-3 py-2 text-sm text-[#1A1A1A]"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-xs text-[#666666]">
+                            Override comment (required to revise)
+                            <textarea
+                              rows={2}
+                              value={commentDrafts[entry.id] || ''}
+                              onChange={(event) =>
+                                setCommentDrafts((current) => ({
+                                  ...current,
+                                  [entry.id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Explain why the AI mark is being changed"
+                              className="resize-y rounded-lg border border-[#E8DCC8] bg-white px-3 py-2 text-sm text-[#1A1A1A]"
+                            />
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleReviewEntry(entry, 'approve')}
+                            loading={reviewingEntryId === entry.id}
+                            disabled={!!reviewingEntryId}
+                          >
+                            <CheckCircle2 size={14} className="mr-2" />
+                            Approve AI mark
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleReviewEntry(entry, 'override')}
+                            loading={reviewingEntryId === entry.id}
+                            disabled={!!reviewingEntryId}
+                          >
+                            Save override
+                          </Button>
+                        </div>
+                        {!!entry.reviewAuditTrail?.length && (
+                          <div className="space-y-2 border-t border-[#E8DCC8] pt-3">
+                            <p className="flex items-center gap-1 text-xs font-semibold text-[#005461]">
+                              <MessageSquare size={13} />
+                              Review history
+                            </p>
+                            {entry.reviewAuditTrail.map((audit) => (
+                              <div key={audit.id} className="rounded border border-[#E8DCC8] bg-white p-2 text-xs">
+                                <p className="font-medium text-[#1A1A1A]">
+                                  {audit.reviewerName} {audit.action === 'approve' ? 'approved' : 'overrode'} the mark
+                                  {' · '}{audit.originalAiMark} → {audit.finalMark}
+                                </p>
+                                <p className="mt-1 text-[#888888]">
+                                  {new Date(audit.reviewedAt).toLocaleString()}
+                                  {audit.comment ? ` · ${audit.comment}` : ''}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </Card>
                 ))}
@@ -379,14 +652,6 @@ function AIReviewContent() {
 
               {/* Action buttons */}
               <div className="flex gap-2 pt-4">
-                <Button
-                  variant="primary"
-                  onClick={() => handleApprove(selectedStudent.answersheetId)}
-                  className="flex-1"
-                >
-                  <CheckCircle2 size={14} className="mr-2" />
-                  Approve & Publish
-                </Button>
                 <Button
                   variant="ghost"
                   onClick={() => setSelectedStudentId(null)}

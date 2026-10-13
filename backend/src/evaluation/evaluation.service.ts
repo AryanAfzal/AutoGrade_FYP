@@ -1,9 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { StudentResult } from './entities/student-result.entity';
 import { AnswerSheet } from '../uploads/entities/answer-sheet.entity';
 import { Exam } from '../exams/entities/exam.entity';
+import { AnswerEntry } from './entities/answer-entry.entity';
+import { ReviewAudit } from './entities/review-audit.entity';
+import { ReviewAnswerEntryDto } from './dto/review-answer-entry.dto';
+import { User } from '../users/entities/user.entity';
 import axios, { AxiosError, isAxiosError } from 'axios';
 import { existsSync } from 'node:fs';
 
@@ -29,25 +38,55 @@ export class EvaluationService {
     private examRepo: Repository<Exam>,
   ) {}
 
-  async getResults(examId: string) {
+  async getResults(examId: string, user: User) {
+    await this.getOwnedExam(examId, user);
     const results = await this.resultRepo.find({
       where: { answerSheet: { exam: { id: examId } } },
-      relations: ['entries', 'answerSheet'],
+      relations: [
+        'entries',
+        'entries.reviewAuditTrail',
+        'entries.reviewAuditTrail.reviewer',
+        'answerSheet',
+      ],
       order: { answerSheet: { uploadedAt: 'DESC' } },
     });
 
     return results.map((result) => ({
+      id: result.id,
       answersheetId: result.answerSheet.id,
       studentName: result.answerSheet.studentName,
       registrationNo: result.answerSheet.registrationNo,
       totalAiMark: result.totalAiMark,
       totalMaxMarks: result.totalMaxMarks,
+      totalApprovedMark: result.totalApprovedMark,
+      reviewCompletedAt: result.reviewCompletedAt,
       status: result.status,
-      entries: result.entries,
+      entries: result.entries.map((entry) => ({
+        ...entry,
+        reviewAuditTrail: (entry.reviewAuditTrail || [])
+          .sort(
+            (first, second) =>
+              new Date(first.reviewedAt).getTime() -
+              new Date(second.reviewedAt).getTime(),
+          )
+          .map((audit) => ({
+            id: audit.id,
+            action: audit.action,
+            originalAiMark: audit.originalAiMark,
+            finalMark: audit.finalMark,
+            comment: audit.comment,
+            reviewedAt: audit.reviewedAt,
+            reviewerName: audit.reviewer.fullName,
+          })),
+      })),
     }));
   }
 
-  async triggerEvaluation(examId: string): Promise<EvaluationJobStartResult> {
+  async triggerEvaluation(
+    examId: string,
+    user: User,
+  ): Promise<EvaluationJobStartResult> {
+    await this.getOwnedExam(examId, user);
     if (this.activeEvaluations.has(examId)) {
       return {
         started: false,
@@ -198,6 +237,154 @@ export class EvaluationService {
     return `HTTP ${status}${error.code ? ` (${error.code})` : ''}: ${responseMessage}`;
   }
 
+  async reviewAnswerEntry(
+    examId: string,
+    entryId: string,
+    dto: ReviewAnswerEntryDto,
+    user: User,
+  ) {
+    return this.resultRepo.manager.transaction(async (manager) => {
+      const entryRepo = manager.getRepository(AnswerEntry);
+      const entry = await entryRepo.findOne({
+        where: { id: entryId },
+        relations: [
+          'result',
+          'result.answerSheet',
+          'result.answerSheet.exam',
+          'result.answerSheet.exam.createdBy',
+        ],
+      });
+
+      if (
+        !entry ||
+        entry.result.answerSheet.exam.id !== examId ||
+        entry.result.answerSheet.exam.createdBy.id !== user.id
+      ) {
+        throw new NotFoundException('Answer entry not found for this exam.');
+      }
+      if (entry.result.status !== 'awaiting_approval') {
+        throw new BadRequestException('Only unpublished results can be reviewed.');
+      }
+
+      let finalMark = entry.aiMark;
+      let comment: string | null = dto.approvalComment?.trim() || null;
+      if (dto.action === 'override') {
+        if (typeof dto.mark !== 'number' || !Number.isFinite(dto.mark)) {
+          throw new BadRequestException('A valid revised mark is required.');
+        }
+        if (dto.mark > entry.maxMarks) {
+          throw new BadRequestException(
+            `The revised mark cannot exceed ${entry.maxMarks}.`,
+          );
+        }
+        if (!dto.comment?.trim()) {
+          throw new BadRequestException(
+            'A comment is required when overriding an AI-assigned mark.',
+          );
+        }
+        finalMark = Math.round(dto.mark * 100) / 100;
+        comment = dto.comment.trim();
+        entry.reviewStatus = 'overridden';
+      } else {
+        entry.reviewStatus = 'approved';
+      }
+
+      entry.approvedMark = finalMark;
+      await entryRepo.save(entry);
+
+      const auditRepo = manager.getRepository(ReviewAudit);
+      const audit = auditRepo.create({
+        answerEntry: entry,
+        reviewer: { id: user.id },
+        action: dto.action,
+        originalAiMark: entry.aiMark,
+        finalMark,
+        comment,
+      });
+      await auditRepo.save(audit);
+
+      const resultRepo = manager.getRepository(StudentResult);
+      const result = await resultRepo.findOne({
+        where: { id: entry.result.id },
+        relations: ['entries'],
+      });
+      if (!result) {
+        throw new NotFoundException('Evaluation result no longer exists.');
+      }
+      result.totalApprovedMark = result.entries.every(
+        (resultEntry) =>
+          resultEntry.reviewStatus !== 'pending' &&
+          resultEntry.approvedMark !== null &&
+          resultEntry.approvedMark !== undefined,
+      )
+        ? result.entries.reduce(
+            (sum, resultEntry) => sum + resultEntry.approvedMark,
+            0,
+          )
+        : null;
+      if (result.reviewCompletedAt) {
+        result.reviewCompletedAt = null;
+      }
+      await resultRepo.save(result);
+
+      return {
+        entryId: entry.id,
+        reviewStatus: entry.reviewStatus,
+        approvedMark: entry.approvedMark,
+        totalApprovedMark: result.totalApprovedMark,
+      };
+    });
+  }
+
+  async completeResultReview(examId: string, resultId: string, user: User) {
+    return this.resultRepo.manager.transaction(async (manager) => {
+      const resultRepo = manager.getRepository(StudentResult);
+      const result = await resultRepo.findOne({
+        where: {
+          id: resultId,
+          answerSheet: { exam: { id: examId, createdBy: { id: user.id } } },
+        },
+        relations: ['entries', 'answerSheet', 'answerSheet.exam', 'answerSheet.exam.questions'],
+      });
+      if (!result) {
+        throw new NotFoundException('Review result not found for this exam.');
+      }
+      if (result.status !== 'awaiting_approval') {
+        throw new BadRequestException('Only unpublished results can be marked done.');
+      }
+
+      const expectedQuestionIds = new Set(
+        result.answerSheet.exam.questions.map((question) => question.id),
+      );
+      if (
+        result.entries.length !== expectedQuestionIds.size ||
+        result.entries.some(
+          (entry) =>
+            !expectedQuestionIds.has(entry.questionId) ||
+            entry.reviewStatus === 'pending' ||
+            entry.approvedMark === null ||
+            entry.approvedMark === undefined,
+        )
+      ) {
+        throw new BadRequestException(
+          'Review every question before marking this paper done.',
+        );
+      }
+
+      result.totalApprovedMark = result.entries.reduce(
+        (sum, entry) => sum + entry.approvedMark,
+        0,
+      );
+      result.reviewCompletedAt = new Date();
+      await resultRepo.save(result);
+
+      return {
+        resultId: result.id,
+        reviewCompletedAt: result.reviewCompletedAt,
+      };
+    });
+  }
+
   // ── getSimilarityFlags ────────────────────────────────────────────────────
   // Called by GET /evaluation/:examId/similarity
   //
@@ -206,15 +393,8 @@ export class EvaluationService {
   // FIX 2: Fetch evaluated results + entries, build the payload the AI
   //        service expects, and include it in the POST body
   // ─────────────────────────────────────────────────────────────────────────
-  async getSimilarityFlags(examId: string) {
-    const exam = await this.examRepo.findOne({
-      where: { id: examId },
-      relations: ['questions'],
-    });
-
-    if (!exam) {
-      throw new Error(`Exam ${examId} not found`);
-    }
+  async getSimilarityFlags(examId: string, user: User) {
+    const exam = await this.getOwnedExam(examId, user);
 
     // Load all evaluated results for this exam
     const results = await this.resultRepo.find({
@@ -266,28 +446,111 @@ export class EvaluationService {
   //      AnswerSheet.status tracks the upload pipeline; StudentResult.status
   //      tracks the review/approval pipeline.
   // ─────────────────────────────────────────────────────────────────────────
-  async publishResults(examId: string) {
-    // Update every StudentResult for this exam to approved
-    const results = await this.resultRepo.find({
-      where: { answerSheet: { exam: { id: examId } } },
-      relations: ['answerSheet'],
+  async publishResults(examId: string, user: User) {
+    return this.resultRepo.manager.transaction(async (manager) => {
+      const examRepo = manager.getRepository(Exam);
+      const exam = await examRepo.findOne({
+        where: { id: examId, createdBy: { id: user.id } },
+        relations: ['questions'],
+      });
+      if (!exam) {
+        throw new NotFoundException('Exam not found.');
+      }
+      if (exam.status === 'published' || exam.publishedAt) {
+        throw new BadRequestException('Results for this exam are already published.');
+      }
+      if (!exam.questions.length) {
+        throw new BadRequestException('An exam without questions cannot be published.');
+      }
+
+      const sheets = await manager.getRepository(AnswerSheet).find({
+        where: { exam: { id: examId } },
+      });
+      if (!sheets.length) {
+        throw new BadRequestException('There are no answer sheets to publish.');
+      }
+
+      const results = await manager.getRepository(StudentResult).find({
+        where: { answerSheet: { exam: { id: examId } } },
+        relations: ['entries', 'answerSheet'],
+      });
+      const expectedQuestionIds = new Set(exam.questions.map((question) => question.id));
+      const completedResults = results.filter(
+        (result) =>
+          result.reviewCompletedAt !== null &&
+          result.status === 'awaiting_approval',
+      );
+      if (!completedResults.length) {
+        throw new BadRequestException(
+          'Mark at least one fully reviewed paper done before publishing.',
+        );
+      }
+
+      for (const result of completedResults) {
+        if (result.status !== 'awaiting_approval') {
+          throw new BadRequestException(
+            'All evaluated results must be awaiting teacher approval before publishing.',
+          );
+        }
+        if (
+          result.entries.length !== expectedQuestionIds.size ||
+          result.entries.some(
+            (entry) =>
+              !expectedQuestionIds.has(entry.questionId) ||
+              entry.reviewStatus === 'pending' ||
+              entry.approvedMark === null ||
+              entry.approvedMark === undefined,
+          )
+        ) {
+          throw new BadRequestException(
+            `Every question for ${result.answerSheet.studentName} must be explicitly reviewed before publishing.`,
+          );
+        }
+        result.totalApprovedMark = result.entries.reduce(
+          (sum, entry) => sum + entry.approvedMark,
+          0,
+        );
+        result.status = 'approved';
+      }
+
+      const completedSheetIds = completedResults.map(
+        (result) => result.answerSheet.id,
+      );
+      await manager.getRepository(StudentResult).save(completedResults);
+      await manager.getRepository(AnswerSheet).update(
+        completedSheetIds,
+        { status: 'approved' },
+      );
+
+      const allResultsPublished =
+        results.length === sheets.length &&
+        results.every((result) => result.status === 'approved');
+      const publishedAt = allResultsPublished ? new Date() : null;
+      if (publishedAt) {
+        exam.status = 'published';
+        exam.publishedAt = publishedAt;
+        await examRepo.save(exam);
+      }
+
+      return {
+        message: allResultsPublished
+          ? 'All exam results published successfully.'
+          : 'Completed paper results published successfully.',
+        publishedCount: completedResults.length,
+        examCompleted: allResultsPublished,
+        publishedAt,
+      };
     });
+  }
 
-    if (!results.length) {
-      return { message: 'No results found to publish' };
+  private async getOwnedExam(examId: string, user: User) {
+    const exam = await this.examRepo.findOne({
+      where: { id: examId, createdBy: { id: user.id } },
+      relations: ['questions'],
+    });
+    if (!exam) {
+      throw new NotFoundException('Exam not found.');
     }
-
-    const ids = results.map((r) => r.id);
-    await this.resultRepo
-      .createQueryBuilder()
-      .update()
-      .set({ status: 'approved' })
-      .whereInIds(ids)
-      .execute();
-
-    return {
-      message:        'Results published successfully',
-      publishedCount: ids.length,
-    };
+    return exam;
   }
 }

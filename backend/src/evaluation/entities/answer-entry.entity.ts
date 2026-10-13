@@ -1,5 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany } from 'typeorm';
 import { StudentResult } from './student-result.entity';
+import { ReviewAudit } from './review-audit.entity';
 
 @Entity('answer_entries')
 export class AnswerEntry {
@@ -45,8 +46,14 @@ export class AnswerEntry {
   @Column({ nullable: true, type: 'float' })
   approvedMark: number;
 
+  @Column({ default: 'pending' })
+  reviewStatus: 'pending' | 'approved' | 'overridden';
+
   @Column()
   type: 'mcq' | 'descriptive';
+
+  @OneToMany(() => ReviewAudit, (audit) => audit.answerEntry)
+  reviewAuditTrail: ReviewAudit[];
 
   @Column('jsonb', { nullable: true })
   rubricBreakdown: {
