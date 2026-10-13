@@ -16,7 +16,13 @@ import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { authApi, examApi } from '@/lib/api';
-import type { Question, QuestionType, User } from '@/types';
+import type {
+  Question,
+  QuestionRubric,
+  RubricConcept,
+  QuestionType,
+  User,
+} from '@/types';
 import { cn } from '@/lib/utils';
 
 interface ExamMetaForm {
@@ -51,6 +57,30 @@ const emptyQuestion = (): Omit<Question, 'id' | 'examId'> => ({
   referenceAnswer: '',
   keywords: [],
 });
+
+const emptyRubric = (maxMarks: number): QuestionRubric => ({
+  concepts: [
+    {
+      name: 'Key concept',
+      description: '',
+      keywords: [],
+      maxMarks,
+      strictness: 'balanced',
+    },
+  ],
+  scoringWeights: { semantic: 0.4, keywords: 0.2, concepts: 0.4 },
+});
+
+const distributeMarks = (concepts: RubricConcept[], totalMarks: number) => {
+  const marksEach = Math.floor((totalMarks / concepts.length) * 100) / 100;
+  return concepts.map((concept, index) => ({
+    ...concept,
+    maxMarks:
+      index === concepts.length - 1
+        ? Number((totalMarks - marksEach * (concepts.length - 1)).toFixed(2))
+        : marksEach,
+  }));
+};
 
 export default function CreateExamPage() {
   const router = useRouter();
@@ -106,7 +136,113 @@ export default function CreateExamPage() {
     value: unknown
   ) => {
     setQuestions((prev) =>
-      prev.map((q, i) => (i === index ? { ...q, [field]: value } : q))
+      prev.map((q, i) => {
+        if (i !== index) return q;
+        const updated = { ...q, [field]: value };
+        if (field === 'maxMarks' && q.rubric) {
+          updated.rubric = {
+            ...q.rubric,
+            concepts: distributeMarks(q.rubric.concepts, Number(value)),
+          };
+        }
+        return updated;
+      })
+    );
+  };
+
+  const updateRubricConcept = (
+    questionIndex: number,
+    conceptIndex: number,
+    field: keyof RubricConcept,
+    value: string | number | string[]
+  ) => {
+    setQuestions((previous) =>
+      previous.map((question, index) => {
+        if (index !== questionIndex || !question.rubric) return question;
+        return {
+          ...question,
+          rubric: {
+            ...question.rubric,
+            concepts: question.rubric.concepts.map((concept, itemIndex) =>
+              itemIndex === conceptIndex
+                ? { ...concept, [field]: value }
+                : concept
+            ),
+          },
+        };
+      })
+    );
+  };
+
+  const addRubricConcept = (questionIndex: number) => {
+    setQuestions((previous) =>
+      previous.map((question, index) => {
+        if (index !== questionIndex || !question.rubric) return question;
+        const concepts = [
+          ...question.rubric.concepts,
+          {
+            name: `Concept ${question.rubric.concepts.length + 1}`,
+            description: '',
+            keywords: [],
+            maxMarks: 0,
+            strictness: 'balanced' as const,
+          },
+        ];
+        return {
+          ...question,
+          rubric: {
+            ...question.rubric,
+            concepts: distributeMarks(concepts, question.maxMarks),
+          },
+        };
+      })
+    );
+  };
+
+  const removeRubricConcept = (questionIndex: number, conceptIndex: number) => {
+    setQuestions((previous) =>
+      previous.map((question, index) => {
+        if (
+          index !== questionIndex ||
+          !question.rubric ||
+          question.rubric.concepts.length <= 1
+        ) {
+          return question;
+        }
+        const concepts = question.rubric.concepts.filter(
+          (_, itemIndex) => itemIndex !== conceptIndex
+        );
+        return {
+          ...question,
+          rubric: {
+            ...question.rubric,
+            concepts: distributeMarks(concepts, question.maxMarks),
+          },
+        };
+      })
+    );
+  };
+
+  const updateScoringWeight = (
+    questionIndex: number,
+    field: keyof QuestionRubric['scoringWeights'],
+    percentage: number
+  ) => {
+    setQuestions((previous) =>
+      previous.map((question, index) => {
+        if (index !== questionIndex) return question;
+        const rubric = question.rubric ?? emptyRubric(question.maxMarks);
+        return {
+          ...question,
+          rubric: {
+            ...rubric,
+            scoringWeights: {
+              ...rubric.scoringWeights,
+              [field]: percentage / 100,
+            },
+          },
+        };
+      })
     );
   };
 
@@ -155,7 +291,15 @@ export default function CreateExamPage() {
     try {
       const result = await examApi.uploadPDF(file);
       if (result.questions?.length) {
-        setQuestions(result.questions);
+        setQuestions(
+          result.questions.map((question) => ({
+            ...question,
+            rubric:
+              question.type === 'descriptive'
+                ? question.rubric ?? emptyRubric(question.maxMarks)
+                : question.rubric,
+          }))
+        );
         setKeywordInput(result.questions.map(() => ''));
       }
     } catch {
@@ -174,6 +318,43 @@ export default function CreateExamPage() {
     for (let i = 0; i < questions.length; i++) {
       if (!questions[i].questionText.trim()) {
         setError(`Question ${i + 1} text is empty.`);
+        return;
+      }
+      const question = questions[i];
+      if (question.type !== 'descriptive') continue;
+      const rubric = question.rubric;
+      if (!rubric?.concepts.length) {
+        setError(`Question ${i + 1} needs at least one rubric concept.`);
+        return;
+      }
+      const marksAssigned = rubric.concepts.reduce(
+        (sum, concept) => sum + Number(concept.maxMarks),
+        0
+      );
+      if (Math.abs(marksAssigned - question.maxMarks) > 0.01) {
+        setError(
+          `Question ${i + 1} rubric marks total ${marksAssigned}, but the question is worth ${question.maxMarks}.`
+        );
+        return;
+      }
+      if (
+        rubric.concepts.some(
+          (concept) =>
+            !concept.name.trim() ||
+            (!concept.description.trim() && concept.keywords.length === 0)
+        )
+      ) {
+        setError(
+          `Each rubric concept in question ${i + 1} needs a name and a description or at least one keyword.`
+        );
+        return;
+      }
+      const weightTotal = Object.values(rubric.scoringWeights).reduce(
+        (sum, weight) => sum + weight,
+        0
+      );
+      if (Math.abs(weightTotal - 1) > 0.001) {
+        setError(`Question ${i + 1} rubric scoring weights must add up to 100%.`);
         return;
       }
     }
@@ -408,10 +589,20 @@ export default function CreateExamPage() {
                       <select
                         value={q.type}
                         onChange={(e) =>
-                          updateQuestion(
-                            qIndex,
-                            'type',
-                            e.target.value as QuestionType
+                          setQuestions((previous) =>
+                            previous.map((question, index) =>
+                              index === qIndex
+                                ? {
+                                    ...question,
+                                    type: e.target.value as QuestionType,
+                                    rubric:
+                                      e.target.value === 'descriptive'
+                                        ? question.rubric ??
+                                          emptyRubric(question.maxMarks)
+                                        : question.rubric,
+                                  }
+                                : question
+                            )
                           )
                         }
                         className="px-3 py-2 text-sm rounded-lg border border-[#E8DCC8] bg-white text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#005461]"
@@ -604,6 +795,163 @@ export default function CreateExamPage() {
                           </div>
                         )}
                       </div>
+                      <section className="space-y-3 rounded-lg border border-[#E8DCC8] bg-[#FFFDF8] p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h4 className="text-sm font-semibold text-[#005461]">
+                              Rubric checkpoints
+                            </h4>
+                            <p className="mt-1 text-xs text-[#888888]">
+                              Allocate all {q.maxMarks} question marks across concepts.
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={
+                              (q.rubric?.concepts.length ?? 0) >=
+                              Math.floor(q.maxMarks * 100)
+                            }
+                            onClick={() => addRubricConcept(qIndex)}
+                          >
+                            Add concept
+                          </Button>
+                        </div>
+                        {(q.rubric?.concepts ?? []).map((concept, conceptIndex) => (
+                          <div
+                            key={`${qIndex}-rubric-${conceptIndex}`}
+                            className="space-y-2 rounded-md border border-[#E8DCC8] bg-white p-3"
+                          >
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_100px_150px_auto]">
+                              <input
+                                value={concept.name}
+                                onChange={(event) =>
+                                  updateRubricConcept(qIndex, conceptIndex, 'name', event.target.value)
+                                }
+                                placeholder="Concept name"
+                                aria-label={`Question ${qIndex + 1} rubric concept ${conceptIndex + 1} name`}
+                                className="min-w-0 rounded-lg border border-[#E8DCC8] px-3 py-2 text-sm"
+                              />
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                value={concept.maxMarks}
+                                onChange={(event) =>
+                                  updateRubricConcept(
+                                    qIndex,
+                                    conceptIndex,
+                                    'maxMarks',
+                                    Number(event.target.value)
+                                  )
+                                }
+                                aria-label={`Marks for ${concept.name}`}
+                                className="rounded-lg border border-[#E8DCC8] px-3 py-2 text-sm"
+                              />
+                              <select
+                                value={concept.strictness}
+                                onChange={(event) =>
+                                  updateRubricConcept(
+                                    qIndex,
+                                    conceptIndex,
+                                    'strictness',
+                                    event.target.value as RubricConcept['strictness']
+                                  )
+                                }
+                                aria-label={`Strictness for ${concept.name}`}
+                                className="rounded-lg border border-[#E8DCC8] bg-white px-3 py-2 text-sm"
+                              >
+                                <option value="lenient">Lenient</option>
+                                <option value="balanced">Balanced</option>
+                                <option value="strict">Strict</option>
+                              </select>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                disabled={(q.rubric?.concepts.length ?? 0) <= 1}
+                                onClick={() => removeRubricConcept(qIndex, conceptIndex)}
+                                aria-label={`Remove ${concept.name}`}
+                              >
+                                <Trash2 size={14} />
+                              </Button>
+                            </div>
+                            <textarea
+                              rows={2}
+                              value={concept.description}
+                              onChange={(event) =>
+                                updateRubricConcept(
+                                  qIndex,
+                                  conceptIndex,
+                                  'description',
+                                  event.target.value
+                                )
+                              }
+                              placeholder="Describe the evidence that demonstrates this concept..."
+                              aria-label={`Description for ${concept.name}`}
+                              className="w-full resize-y rounded-lg border border-[#E8DCC8] px-3 py-2 text-sm"
+                            />
+                            <input
+                              value={concept.keywords.join(', ')}
+                              onChange={(event) =>
+                                updateRubricConcept(
+                                  qIndex,
+                                  conceptIndex,
+                                  'keywords',
+                                  event.target.value
+                                    .split(',')
+                                    .map((keyword) => keyword.trim())
+                                    .filter(Boolean)
+                                )
+                              }
+                              placeholder="Optional concept keywords, separated by commas"
+                              aria-label={`Keywords for ${concept.name}`}
+                              className="w-full rounded-lg border border-[#E8DCC8] px-3 py-2 text-sm"
+                            />
+                          </div>
+                        ))}
+                        <p className="text-xs text-[#888888]">
+                          Allocated: {(q.rubric?.concepts ?? []).reduce(
+                            (sum, concept) => sum + concept.maxMarks,
+                            0
+                          )}{' '}
+                          / {q.maxMarks} marks
+                        </p>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          {(
+                            [
+                              ['semantic', 'Reference-answer similarity'],
+                              ['keywords', 'Keyword evidence'],
+                              ['concepts', 'Concept coverage'],
+                            ] as const
+                          ).map(([field, label]) => (
+                            <label key={field} className="flex flex-col gap-1 text-xs text-[#666666]">
+                              {label} weight (%)
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={Math.round(
+                                  (q.rubric?.scoringWeights[field] ?? 0) * 100
+                                )}
+                                onChange={(event) =>
+                                  updateScoringWeight(
+                                    qIndex,
+                                    field,
+                                    Number(event.target.value)
+                                  )
+                                }
+                                className="rounded-lg border border-[#E8DCC8] px-3 py-2 text-sm text-[#1A1A1A]"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        <p className="text-xs text-[#888888]">
+                          Scoring weights must total 100%.
+                        </p>
+                      </section>
                     </div>
                   )}
                 </div>

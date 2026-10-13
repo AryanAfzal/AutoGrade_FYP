@@ -61,6 +61,27 @@ export interface MCQOption {
   text: string;
 }
 
+export type RubricStrictness = 'lenient' | 'balanced' | 'strict';
+
+export interface RubricConcept {
+  name: string;
+  description: string;
+  keywords: string[];
+  maxMarks: number;
+  strictness: RubricStrictness;
+}
+
+export interface RubricScoringWeights {
+  semantic: number;
+  keywords: number;
+  concepts: number;
+}
+
+export interface QuestionRubric {
+  concepts: RubricConcept[];
+  scoringWeights: RubricScoringWeights;
+}
+
 export interface Question {
   id: string;
   examId: string;
@@ -74,6 +95,7 @@ export interface Question {
   // Descriptive specific
   referenceAnswer?: string;
   keywords?: string[];
+  rubric?: QuestionRubric;
 }
 
 export interface Exam {
@@ -122,6 +144,16 @@ export interface AnswerEntry {
   isFlagged: boolean;
   approvedMark?: number;
   type: QuestionType;
+  rubricBreakdown?: {
+    conceptName: string;
+    maxMarks: number;
+    coverage: number;
+    awardedMarks: number;
+    status: 'addressed' | 'partially addressed' | 'not addressed';
+    strictness: RubricStrictness;
+  }[] | null;
+  conceptScore?: number;
+  feedback?: string | null;
 }
 
 export interface StudentResult {
