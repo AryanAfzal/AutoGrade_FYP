@@ -57,12 +57,16 @@ function AIReviewContent() {
     Promise.all([
       examApi.getById(examId).catch(() => null),
       evaluationApi.getResults(examId).catch(() => []),
-      evaluationApi.getSimilarityFlags(examId).catch(() => null),
     ])
-      .then(([examData, resultsData, similarityData]) => {
+      .then(([examData, resultsData]) => {
         setExam(examData);
         setResults(resultsData.filter((r) => r.status === 'awaiting_approval'));
+      })
+      .catch(() => setError('Failed to load review data'))
+      .finally(() => setLoading(false));
 
+    evaluationApi.getSimilarityFlags(examId)
+      .then((similarityData) => {
         // Backend returns { examId, summary, flaggedPairs }
         if (Array.isArray(similarityData)) {
           setSimilarities(similarityData);
@@ -72,8 +76,7 @@ function AIReviewContent() {
           setSimilarities([]);
         }
       })
-      .catch(() => setError('Failed to load review data'))
-      .finally(() => setLoading(false));
+      .catch(() => setSimilarities([]));
   }, [examId]);
 
   const handleApprove = async (studentId: string) => {
@@ -295,7 +298,7 @@ function AIReviewContent() {
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <p className="text-sm font-semibold text-[#1A1A1A]">
-                            Q{idx + 1}: {entry.questionText.substring(0, 60)}...
+                            Q{idx + 1}: {entry.questionText}
                           </p>
                           <div className="flex gap-2 mt-2 flex-wrap">
                             <Badge variant="default">{entry.aiMark}/{entry.maxMarks}</Badge>
@@ -327,12 +330,12 @@ function AIReviewContent() {
                         </div>
                       </div>
 
-                      {entry.isFlagged && (
-                        <div className="bg-white rounded border border-[#E8DCC8] p-2 mt-2">
-                          <p className="text-xs font-medium text-[#888888] mb-1">Student Answer:</p>
-                          <p className="text-xs text-[#1A1A1A] line-clamp-3">{entry.studentAnswer}</p>
-                        </div>
-                      )}
+                      <div className="bg-white rounded border border-[#E8DCC8] p-3">
+                        <p className="text-xs font-medium text-[#888888] mb-1">Student Answer:</p>
+                        <p className="text-sm text-[#1A1A1A] whitespace-pre-wrap break-words">
+                          {entry.studentAnswer?.trim() || 'No answer was extracted for this question.'}
+                        </p>
+                      </div>
                     </div>
                   </Card>
                 ))}

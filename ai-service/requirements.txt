@@ -1,16 +1,24 @@
 # AI Service dependencies
-# No pinned versions — pip resolves latest compatible versions
-#
-# IMPORTANT: install numpy and torch first to avoid source compilation:
-#   pip install numpy torch --only-binary=:all:
-# Then:
-#   pip install -r requirements.txt
+# The handwriting OCR dependencies follow the source project's PaddleOCR 2.x
+# pipeline. Use Python 3.10 or 3.11 as specified by that project.
+# Install a PyTorch/torchvision build appropriate for CPU or the local CUDA
+# runtime before this file when GPU acceleration is required.
 
-fastapi
-uvicorn[standard]
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+python-dotenv==1.2.4
 python-multipart
 sentence-transformers
 pdfplumber
+PyMuPDF==1.28.2
+Pillow==12.3.0
+opencv-python==4.10.0.84
+paddleocr==2.9.1
+paddlepaddle==2.6.2
+torch==2.13.0
+torchvision==0.28.0
+transformers==5.15.0
 httpx
 pydantic
-numpy
+numpy==1.26.4
+symspellpy==6.10.0

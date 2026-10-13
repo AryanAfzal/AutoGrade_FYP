@@ -1,5 +1,7 @@
 import re
 import pdfplumber
+import tempfile
+import time
 from typing import Optional
 
 
@@ -27,66 +29,262 @@ def extract_student_info(file_path: str) -> dict:
     return {"studentName": student_name, "registrationNo": reg_no}
 
 
-def extract_answers_from_sheet(file_path: str) -> list[dict]:
+def _parse_answers_from_lines(
+    lines: list[str],
+    expected_question_count: Optional[int] = None,
+) -> list[dict]:
     answers = []
-    numbered_q = re.compile(r"^(?:Q(?:uestion)?\s*(\d+)[.\):]|(\d+)\.\s)", re.IGNORECASE)
+    numbered_q = re.compile(
+        r"^(?:Q(?:uestion)?\s*(\d+)|(\d+))[.\):\-]?\s*(.*)$",
+        re.IGNORECASE,
+    )
     bare_q = re.compile(r"^Question\s*[:\-]\s*", re.IGNORECASE)
     answer_marker = re.compile(r"^(?:answer|ans)\s*[:\-]", re.IGNORECASE)
     header_fields = re.compile(r"^(?:name|reg(?:istration)?\s*(?:no|number)?|subject|course|date|roll\s*no)\s*[:\-]", re.IGNORECASE)
 
+    current_q_num: Optional[int] = None
+    q_counter = 0
+    collecting_answer = False
+    answer_lines: list[str] = []
+
+    def flush_answer():
+        if current_q_num is not None and answer_lines:
+            answers.append({
+                "questionNumber": current_q_num,
+                "answerText": " ".join(answer_lines).strip(),
+            })
+
+    for line in lines:
+        line = line.strip()
+        if not line or header_fields.match(line):
+            continue
+        qm = numbered_q.match(line)
+        if qm:
+            question_number = int(qm.group(1) or qm.group(2))
+            explicit_header = bool(qm.group(1))
+            upper_bound = expected_question_count or 99
+            bare_header_shape = bool(
+                re.match(r"^\d{1,2}(?:\s*[.):\-]\s*.*)?$", line)
+            )
+            is_sequential_number = (
+                current_q_num is None and question_number == 1
+            ) or (
+                current_q_num is not None and question_number == current_q_num + 1
+            )
+            if (
+                question_number <= upper_bound
+                and (
+                    explicit_header
+                    or (is_sequential_number and bare_header_shape)
+                )
+            ):
+                flush_answer()
+                current_q_num = question_number
+                collecting_answer = True
+                inline_answer = qm.group(3).strip()
+                answer_lines = [inline_answer] if inline_answer else []
+                continue
+            if collecting_answer:
+                answer_lines.append(line)
+            continue
+        if bare_q.match(line):
+            flush_answer()
+            q_counter += 1
+            current_q_num = q_counter
+            collecting_answer = True
+            answer_lines = []
+            continue
+        if answer_marker.match(line):
+            if current_q_num is None:
+                current_q_num = 1
+            collecting_answer = True
+            inline = answer_marker.sub("", line).strip()
+            answer_lines = [inline] if inline else []
+            continue
+        if collecting_answer:
+            answer_lines.append(line)
+
+    flush_answer()
+    return answers
+
+
+def _extract_answers_with_handwriting_ocr(
+    file_path: str,
+    expected_question_count: Optional[int] = None,
+) -> list[dict]:
+    from services.handwriting_ocr import extract_text_from_image
+    from services.image_processor import preprocess_all_images
+    from services.pdf_converter import convert_pdf_to_images
+    from services.text_cleaner import (
+        OLLAMA_CORRECTION_BUDGET_SECONDS,
+        clean_results,
+    )
+
+    document_header = re.compile(
+        r"^(?:student\s*name|name|reg(?:istration)?\s*(?:no|number|#)|roll\s*no|course|subject|date)\s*[:\-]",
+        re.IGNORECASE,
+    )
+    raw_results = []
+
+    with tempfile.TemporaryDirectory(prefix="autograde-handwriting-") as work_dir:
+        conversion_started_at = time.perf_counter()
+        image_paths = convert_pdf_to_images(file_path, output_folder=work_dir)
+        if not image_paths:
+            raise ValueError("The answer-sheet PDF contains no pages.")
+        print(
+            f"[pdf_parser] Rendered {len(image_paths)} page(s) in "
+            f"{time.perf_counter() - conversion_started_at:.1f}s."
+        )
+
+        preprocessing_started_at = time.perf_counter()
+        preprocessed_paths = preprocess_all_images(image_paths)
+        print(
+            f"[pdf_parser] Preprocessed {len(preprocessed_paths)} page(s) in "
+            f"{time.perf_counter() - preprocessing_started_at:.1f}s."
+        )
+        for page_number, image_path in enumerate(preprocessed_paths, start=1):
+            page_started_at = time.perf_counter()
+            page_lines = extract_text_from_image(image_path)
+            raw_results.extend(page_lines)
+            print(
+                f"[pdf_parser] OCR page {page_number}/{len(preprocessed_paths)} "
+                f"returned {len(page_lines)} line(s) in "
+                f"{time.perf_counter() - page_started_at:.1f}s."
+            )
+
+    correction_deadline = (
+        time.monotonic() + OLLAMA_CORRECTION_BUDGET_SECONDS
+    )
+    answer_groups = _group_ocr_lines_by_question(
+        raw_results,
+        expected_question_count=expected_question_count,
+    )
+    structured_answers = []
+    for question_number, answer_lines in answer_groups.items():
+        usable_lines = [
+            item
+            for item in answer_lines
+            if item["text"].strip() and not document_header.match(item["text"].strip())
+        ]
+        cleaned_lines = clean_results(
+            usable_lines,
+            deadline=correction_deadline,
+        )
+        answer_text = "\n".join(
+            item["text"].strip() for item in cleaned_lines if item["text"].strip()
+        ).strip()
+        if answer_text:
+            structured_answers.append(
+                {"questionNumber": question_number, "answerText": answer_text}
+            )
+
+    print(
+        f"[pdf_parser] Structured {len(structured_answers)} answer(s) from "
+        f"{len(raw_results)} OCR line(s)."
+    )
+    return structured_answers
+
+
+_EXPLICIT_OCR_QUESTION_HEADER = re.compile(
+    r"^\s*(?:q(?:uestion)?|[yYgGbB])\s*#?\s*0?(\d{1,2})\b\s*[:.)\-]?\s*(.*)$",
+    re.IGNORECASE,
+)
+_NUMBERED_QUESTION_HEADER = re.compile(r"^\s*0?(\d{1,2})\s*([:.)\-])\s*(.*)$")
+_BARE_NUMBERED_QUESTION = re.compile(r"^\s*0?(\d{1,2})\s+(.+?)\s*$")
+
+
+def _group_ocr_lines_by_question(
+    ocr_lines: list[dict],
+    expected_question_count: Optional[int] = None,
+) -> dict[int, list[dict]]:
+    """Split page-ordered OCR lines before language-model correction can rewrite labels."""
+    groups: dict[int, list[dict]] = {}
+    current_question: Optional[int] = None
+
+    for item in ocr_lines:
+        text = item["text"].strip()
+        explicit_header = _EXPLICIT_OCR_QUESTION_HEADER.match(text)
+        numbered_header = _NUMBERED_QUESTION_HEADER.match(text)
+
+        if explicit_header:
+            question_number = int(explicit_header.group(1))
+            remainder = explicit_header.group(2).strip()
+            is_header = True
+        elif numbered_header:
+            question_number = int(numbered_header.group(1))
+            remainder = numbered_header.group(3).strip()
+            is_header = True
+        else:
+            bare_number = _BARE_NUMBERED_QUESTION.match(text)
+            question_number = int(bare_number.group(1)) if bare_number else 0
+            # Only treat a short, sequential numeric line as a damaged question
+            # label. Long lines such as "1 The answer is..." remain answer text.
+            is_header = bool(
+                bare_number
+                and len(text) <= 24
+                and question_number == (current_question or 0) + 1
+            )
+            remainder = ""
+
+        upper_bound = expected_question_count or 99
+        if is_header and 1 <= question_number <= upper_bound:
+            if current_question is None or question_number > current_question:
+                current_question = question_number
+                groups.setdefault(current_question, [])
+            if remainder:
+                groups[current_question].append({**item, "text": remainder})
+            continue
+
+        if current_question is None:
+            current_question = 1
+        groups.setdefault(current_question, []).append(item)
+
+    return groups
+
+
+def extract_answers_from_sheet(
+    file_path: str,
+    expected_question_count: Optional[int] = None,
+) -> list[dict]:
     try:
         with pdfplumber.open(file_path) as pdf:
             full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
 
-        lines = full_text.splitlines()
-        current_q_num: Optional[int] = None
-        q_counter = 0
-        collecting_answer = False
-        answer_lines: list[str] = []
+        text_answers = _parse_answers_from_lines(
+            full_text.splitlines(),
+            expected_question_count=expected_question_count,
+        )
+    except Exception as error:
+        print(f"[pdf_parser] Text-layer extraction failed for {file_path}: {error}")
+        text_answers = []
 
-        def flush_answer():
-            if current_q_num is not None and answer_lines:
-                answers.append({
-                    "questionNumber": current_q_num,
-                    "answerText": " ".join(answer_lines).strip(),
-                })
+    if expected_question_count is None:
+        use_handwriting_ocr = not text_answers
+    else:
+        use_handwriting_ocr = len(text_answers) < expected_question_count
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if header_fields.match(line):
-                continue
-            qm = numbered_q.match(line)
-            if qm:
-                flush_answer()
-                current_q_num = int(qm.group(1) or qm.group(2))
-                collecting_answer = False
-                answer_lines = []
-                continue
-            if bare_q.match(line):
-                flush_answer()
-                q_counter += 1
-                current_q_num = q_counter
-                collecting_answer = False
-                answer_lines = []
-                continue
-            if answer_marker.match(line):
-                if current_q_num is None:
-                    current_q_num = 1
-                collecting_answer = True
-                inline = answer_marker.sub("", line).strip()
-                answer_lines = [inline] if inline else []
-                continue
-            if collecting_answer:
-                answer_lines.append(line)
+    if not use_handwriting_ocr:
+        return text_answers
 
-        flush_answer()
+    try:
+        ocr_answers = _extract_answers_with_handwriting_ocr(
+            file_path,
+            expected_question_count=expected_question_count,
+        )
+    except Exception as error:
+        raise RuntimeError(
+            f"Handwriting OCR failed for {file_path}: {error}"
+        ) from error
 
-    except Exception as e:
-        print(f"[pdf_parser] extract_answers_from_sheet error: {e}")
+    if not text_answers:
+        return ocr_answers
 
-    return answers
+    merged_answers = {answer["questionNumber"]: answer for answer in text_answers}
+    for answer in ocr_answers:
+        existing = merged_answers.get(answer["questionNumber"])
+        if existing is None or len(answer["answerText"]) > len(existing["answerText"]):
+            merged_answers[answer["questionNumber"]] = answer
+    return [merged_answers[number] for number in sorted(merged_answers)]
 
 
 def parse_exam_pdf(file_path: str) -> list[dict]:

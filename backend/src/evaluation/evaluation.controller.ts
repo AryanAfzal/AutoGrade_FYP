@@ -12,7 +12,7 @@ export class EvaluationController {
 
   @Post(':examId/trigger')
   triggerEvaluation(@Param('examId') examId: string) {
-    return this.evaluationService.getResults(examId);
+    return this.evaluationService.triggerEvaluation(examId);
   }
 
   @Get(':examId')
