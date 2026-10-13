@@ -231,12 +231,54 @@ export const evaluationApi = {
     return handleResponse<import('@/types').SimilarityFlag[]>(res);
   },
 
+  reviewAnswerEntry: async (
+    examId: string,
+    entryId: string,
+    payload:
+      | { action: 'approve'; approvalComment?: string }
+      | { action: 'override'; mark: number; comment: string },
+  ) => {
+    const res = await fetch(
+      `${BASE_URL}/evaluation/${examId}/entries/${entryId}/review`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
+      },
+    );
+    return handleResponse<{
+      entryId: string;
+      reviewStatus: 'approved' | 'overridden';
+      approvedMark: number;
+      totalApprovedMark: number | null;
+    }>(res);
+  },
+
+  completeResultReview: async (examId: string, resultId: string) => {
+    const res = await fetch(
+      `${BASE_URL}/evaluation/${examId}/results/${resultId}/complete`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+      },
+    );
+    return handleResponse<{
+      resultId: string;
+      reviewCompletedAt: string;
+    }>(res);
+  },
+
   publishResults: async (examId: string) => {
     const res = await fetch(`${BASE_URL}/evaluation/${examId}/publish`, {
       method: 'POST',
       headers: authHeaders(),
     });
-    return handleResponse<{ message: string }>(res);
+    return handleResponse<{
+      message: string;
+      publishedCount: number;
+      examCompleted: boolean;
+      publishedAt: string | null;
+    }>(res);
   },
 };
 

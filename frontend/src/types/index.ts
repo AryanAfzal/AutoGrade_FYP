@@ -105,6 +105,7 @@ export interface Exam {
   term: string;
   totalMarks: number;
   status: 'draft' | 'active' | 'under_review' | 'published' | 'closed';
+  publishedAt?: string | null;
   createdAt: string;
   questions: Question[];
 }
@@ -143,6 +144,8 @@ export interface AnswerEntry {
   isCorrect?: boolean;
   isFlagged: boolean;
   approvedMark?: number;
+  reviewStatus: 'pending' | 'approved' | 'overridden';
+  reviewAuditTrail?: ReviewAuditEntry[];
   type: QuestionType;
   rubricBreakdown?: {
     conceptName: string;
@@ -156,12 +159,25 @@ export interface AnswerEntry {
   feedback?: string | null;
 }
 
+export interface ReviewAuditEntry {
+  id: string;
+  action: 'approve' | 'override';
+  originalAiMark: number;
+  finalMark: number;
+  comment: string | null;
+  reviewedAt: string;
+  reviewerName: string;
+}
+
 export interface StudentResult {
+  id: string;
   answersheetId: string;
   studentName: string;
   registrationNo: string;
   totalAiMark: number;
   totalMaxMarks: number;
+  totalApprovedMark: number | null;
+  reviewCompletedAt: string | null;
   status: SheetStatus;
   entries: AnswerEntry[];
 }

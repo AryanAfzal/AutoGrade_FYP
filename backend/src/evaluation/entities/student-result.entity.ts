@@ -16,6 +16,12 @@ export class StudentResult {
   @Column()
   totalMaxMarks: number;
 
+  @Column({ type: 'float', nullable: true })
+  totalApprovedMark: number | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reviewCompletedAt: Date | null;
+
   @Column({ default: 'awaiting_approval' })
   status: string;
 
