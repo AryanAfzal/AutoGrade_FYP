@@ -21,3 +21,4 @@ transformers==5.15.0
 httpx
 pydantic
 numpy==1.26.4
+symspellpy==6.10.0

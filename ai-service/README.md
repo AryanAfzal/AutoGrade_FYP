@@ -9,8 +9,8 @@ When PDF text extraction returns fewer answer entries than the exam has question
 1. Renders the PDF pages at 288 DPI with PyMuPDF.
 2. Scales and enhances each page with OpenCV (bilateral denoising, CLAHE, and sharpening).
 3. Detects text regions with PaddleOCR and refines low-confidence line crops in batches with Microsoft TrOCR.
-4. Detects question boundaries from raw OCR labels before language-model correction, then corrects each answer separately in bounded text chunks with a conservative local Ollama prompt.
-5. Preserves recognizer confidence rather than assigning an artificial confidence to corrected text, then sends the structured answers through the existing MCQ/SBERT evaluator.
+4. Detects question boundaries from raw OCR labels before language-model correction, then sends each answer to local Ollama for contextual OCR correction. If Ollama is unavailable or its shared correction budget expires, SymSpell and OCR-specific substitutions provide an offline fallback.
+5. Retains the recognizer confidence for SymSpell-only output. Ollama-corrected lines are assigned a fixed confidence of `0.98` by this implementation; this is a configured value, not a calibrated recognition confidence, so teacher review remains important.
 
 The existing teacher review-before-publishing flow remains in place. OCR/SBERT output should be treated as a draft grade for teacher review, not as a final decision.
 
@@ -33,7 +33,7 @@ PaddleOCR also downloads its detector and recognizer model assets on first initi
 
 The OCR archive does not contain custom TrOCR fine-tuned weights or training code. Its loader uses the standard `microsoft/trocr-base-handwritten` checkpoint, with an optional local checkpoint directory. Therefore this integration carries over the archive's OCR pipeline and configuration, but does not claim to include a project-specific fine-tuned model.
 
-Ollama contextual correction is attempted by default. If Ollama is unavailable, the service keeps the original OCR text instead of applying speculative dictionary rewrites. Install Ollama, then pull the configured model:
+Ollama contextual correction is attempted by default. If Ollama is unavailable, SymSpell applies offline spelling corrections using its English frequency dictionaries. Install Ollama, then pull the configured model:
 
 ```powershell
 ollama pull qwen2.5:1.5b
@@ -46,6 +46,7 @@ OCR_ENABLE_OLLAMA=true
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:1.5b
 OLLAMA_TIMEOUT=15
+OLLAMA_CORRECTION_BUDGET_SECONDS=45
 ```
 
 Scanned/image-only PDFs need the OCR dependencies and TrOCR checkpoint available. Ollama can correct some recognition errors but cannot recover handwriting the vision recognizers did not read; review uncertain answers before grading is finalized. OCR/SBERT output should be treated as a draft grade for teacher review, not as a final decision.
