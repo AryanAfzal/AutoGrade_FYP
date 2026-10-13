@@ -29,6 +29,246 @@ class PDFParserTests(unittest.TestCase):
             ["This is the second answer."],
         )
 
+    def test_splits_real_pdf_ocr_question_markers_and_common_label_formats(self):
+        marker_pairs = [
+            ("4 01.", "402"),
+            ("Question # 01", "Question 02"),
+            ("Q # 01", "Q # 02"),
+            ("Q#01", "Q02"),
+        ]
+
+        for first_marker, second_marker in marker_pairs:
+            with self.subTest(first_marker=first_marker, second_marker=second_marker):
+                lines = [
+                    {"text": first_marker, "confidence": 0.8},
+                    {"text": "Artificial Intelligence is a branch of computer science.", "confidence": 0.85},
+                    {"text": second_marker, "confidence": 0.8},
+                    {"text": "Machine learning learns patterns from data.", "confidence": 0.84},
+                ]
+
+                grouped = _group_ocr_lines_by_question(
+                    lines,
+                    expected_question_count=2,
+                )
+                parsed = _parse_answers_from_lines(
+                    [item["text"] for item in lines],
+                    expected_question_count=2,
+                )
+
+                self.assertEqual(
+                    [item["text"] for item in grouped[1]],
+                    ["Artificial Intelligence is a branch of computer science."],
+                )
+                self.assertEqual(
+                    [item["text"] for item in grouped[2]],
+                    ["Machine learning learns patterns from data."],
+                )
+                self.assertEqual(
+                    parsed,
+                    [
+                        {
+                            "questionNumber": 1,
+                            "answerText": "Artificial Intelligence is a branch of computer science.",
+                        },
+                        {
+                            "questionNumber": 2,
+                            "answerText": "Machine learning learns patterns from data.",
+                        },
+                    ],
+                )
+
+    def test_splits_unnumbered_handwritten_question_prompts(self):
+        grouped = _group_ocr_lines_by_question(
+            [
+                {"text": "What is AI?", "confidence": 0.91},
+                {"text": "AI is artificial intelligence.", "confidence": 0.84},
+                {"text": "What is ML?", "confidence": 0.89},
+                {"text": "ML learns patterns from data.", "confidence": 0.82},
+            ],
+            expected_question_count=2,
+            expected_question_texts=["What is AI?", "What is ML?"],
+        )
+
+        self.assertEqual(
+            [item["text"] for item in grouped[1]],
+            ["AI is artificial intelligence."],
+        )
+        self.assertEqual(
+            [item["text"] for item in grouped[2]],
+            ["ML learns patterns from data."],
+        )
+
+    def test_parses_unnumbered_handwritten_question_prompts(self):
+        answers = _parse_answers_from_lines(
+            [
+                "What is AI?",
+                "AI is artificial intelligence.",
+                "What is ML?",
+                "ML learns patterns from data.",
+            ],
+            expected_question_count=2,
+            expected_question_texts=["What is AI?", "What is ML?"],
+        )
+
+        self.assertEqual(
+            answers,
+            [
+                {
+                    "questionNumber": 1,
+                    "answerText": "AI is artificial intelligence.",
+                },
+                {
+                    "questionNumber": 2,
+                    "answerText": "ML learns patterns from data.",
+                },
+            ],
+        )
+
+    def test_groups_question_prompts_when_answers_are_out_of_order(self):
+        grouped = _group_ocr_lines_by_question(
+            [
+                {"text": "What is Artificial Intelligence?", "confidence": 0.91},
+                {"text": "Artificial Intelligence creates intelligent machines.", "confidence": 0.84},
+                {"text": "What is Machine Learning?", "confidence": 0.89},
+                {"text": "Machine Learning learns patterns from data.", "confidence": 0.82},
+            ],
+            expected_question_count=2,
+            expected_question_texts=[
+                "What is Machine Learning?",
+                "What is Artificial Intelligence?",
+            ],
+        )
+
+        self.assertEqual(
+            [item["text"] for item in grouped[2]],
+            ["Artificial Intelligence creates intelligent machines."],
+        )
+        self.assertEqual(
+            [item["text"] for item in grouped[1]],
+            ["Machine Learning learns patterns from data."],
+        )
+
+    def test_parses_question_prompts_when_answers_are_out_of_order(self):
+        answers = _parse_answers_from_lines(
+            [
+                "What is Artificial Intelligence?",
+                "Artificial Intelligence creates intelligent machines.",
+                "What is Machine Learning?",
+                "Machine Learning learns patterns from data.",
+            ],
+            expected_question_count=2,
+            expected_question_texts=[
+                "What is Machine Learning?",
+                "What is Artificial Intelligence?",
+            ],
+        )
+
+        self.assertEqual(
+            answers,
+            [
+                {
+                    "questionNumber": 1,
+                    "answerText": "Machine Learning learns patterns from data.",
+                },
+                {
+                    "questionNumber": 2,
+                    "answerText": "Artificial Intelligence creates intelligent machines.",
+                },
+            ],
+        )
+
+    def test_starts_next_question_on_short_question_line_without_prompt_match(self):
+        question_texts = [
+            "Describe computer networks.",
+            "Explain operating systems.",
+        ]
+        ocr_lines = [
+            {"text": "Why do students write notes?", "confidence": 0.9},
+            {"text": "They record important information.", "confidence": 0.85},
+            {"text": "How do clouds form?", "confidence": 0.9},
+            {"text": "Water vapor cools and condenses.", "confidence": 0.84},
+        ]
+
+        grouped = _group_ocr_lines_by_question(
+            ocr_lines,
+            expected_question_count=2,
+            expected_question_texts=question_texts,
+        )
+        answers = _parse_answers_from_lines(
+            [item["text"] for item in ocr_lines],
+            expected_question_count=2,
+            expected_question_texts=question_texts,
+        )
+
+        self.assertEqual(
+            [item["text"] for item in grouped[1]],
+            ["They record important information."],
+        )
+        self.assertEqual(
+            [item["text"] for item in grouped[2]],
+            ["Water vapor cools and condenses."],
+        )
+        self.assertEqual(
+            answers,
+            [
+                {
+                    "questionNumber": 1,
+                    "answerText": "They record important information.",
+                },
+                {
+                    "questionNumber": 2,
+                    "answerText": "Water vapor cools and condenses.",
+                },
+            ],
+        )
+
+    def test_question_text_after_numbered_marker_does_not_start_another_question(self):
+        lines = [
+            "Q1",
+            "What is Machine Learning?",
+            "Machine learning learns patterns from data.",
+            "Q2",
+            "What is Artificial Intelligence?",
+            "Artificial intelligence enables machines to perform intelligent tasks.",
+        ]
+        question_texts = [
+            "What is Machine Learning?",
+            "What is Artificial Intelligence?",
+        ]
+
+        grouped = _group_ocr_lines_by_question(
+            [{"text": line, "confidence": 0.9} for line in lines],
+            expected_question_count=2,
+            expected_question_texts=question_texts,
+        )
+        answers = _parse_answers_from_lines(
+            lines,
+            expected_question_count=2,
+            expected_question_texts=question_texts,
+        )
+
+        self.assertEqual(
+            [item["text"] for item in grouped[1]],
+            ["Machine learning learns patterns from data."],
+        )
+        self.assertEqual(
+            [item["text"] for item in grouped[2]],
+            ["Artificial intelligence enables machines to perform intelligent tasks."],
+        )
+        self.assertEqual(
+            answers,
+            [
+                {
+                    "questionNumber": 1,
+                    "answerText": "Machine learning learns patterns from data.",
+                },
+                {
+                    "questionNumber": 2,
+                    "answerText": "Artificial intelligence enables machines to perform intelligent tasks.",
+                },
+            ],
+        )
+
     def test_keeps_long_numeric_answer_line_in_current_question(self):
         grouped = _group_ocr_lines_by_question(
             [

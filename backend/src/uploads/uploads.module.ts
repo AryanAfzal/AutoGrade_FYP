@@ -4,9 +4,10 @@ import { AnswerSheet } from './entities/answer-sheet.entity';
 import { UploadsService } from './uploads.service';
 import { UploadsController } from './uploads.controller';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AnswerSheet])],
+  imports: [TypeOrmModule.forFeature([AnswerSheet]), UsersModule],
   providers: [UploadsService, RolesGuard],
   controllers: [UploadsController],
   exports: [UploadsService],

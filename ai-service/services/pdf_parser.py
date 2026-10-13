@@ -1,4 +1,5 @@
 import re
+import difflib
 import pdfplumber
 import tempfile
 import time
@@ -32,6 +33,7 @@ def extract_student_info(file_path: str) -> dict:
 def _parse_answers_from_lines(
     lines: list[str],
     expected_question_count: Optional[int] = None,
+    expected_question_texts: Optional[list[str]] = None,
 ) -> list[dict]:
     answers = []
     numbered_q = re.compile(
@@ -58,6 +60,37 @@ def _parse_answers_from_lines(
         line = line.strip()
         if not line or header_fields.match(line):
             continue
+        prompt_number = _match_question_prompt(
+            line,
+            expected_question_texts,
+        )
+        if prompt_number is not None:
+            if prompt_number == current_q_num:
+                continue
+            flush_answer()
+            current_q_num = prompt_number
+            collecting_answer = True
+            answer_lines = []
+            continue
+        if _is_short_question_heading(line):
+            next_question = (current_q_num or 0) + 1
+            if expected_question_count is None or next_question <= expected_question_count:
+                flush_answer()
+                current_q_num = next_question
+                collecting_answer = True
+                answer_lines = []
+                continue
+        ocr_qm = _EXPLICIT_OCR_QUESTION_HEADER.match(line)
+        if ocr_qm:
+            question_number = int(ocr_qm.group(1))
+            upper_bound = expected_question_count or 99
+            if 1 <= question_number <= upper_bound:
+                flush_answer()
+                current_q_num = question_number
+                collecting_answer = True
+                inline_answer = ocr_qm.group(2).strip()
+                answer_lines = [inline_answer] if inline_answer else []
+                continue
         qm = numbered_q.match(line)
         if qm:
             question_number = int(qm.group(1) or qm.group(2))
@@ -105,12 +138,13 @@ def _parse_answers_from_lines(
             answer_lines.append(line)
 
     flush_answer()
-    return answers
+    return sorted(answers, key=lambda answer: answer["questionNumber"])
 
 
 def _extract_answers_with_handwriting_ocr(
     file_path: str,
     expected_question_count: Optional[int] = None,
+    expected_question_texts: Optional[list[str]] = None,
 ) -> list[dict]:
     from services.handwriting_ocr import extract_text_from_image
     from services.image_processor import preprocess_all_images
@@ -158,6 +192,7 @@ def _extract_answers_with_handwriting_ocr(
     answer_groups = _group_ocr_lines_by_question(
         raw_results,
         expected_question_count=expected_question_count,
+        expected_question_texts=expected_question_texts,
     )
     structured_answers = []
     for question_number, answer_lines in answer_groups.items():
@@ -182,11 +217,11 @@ def _extract_answers_with_handwriting_ocr(
         f"[pdf_parser] Structured {len(structured_answers)} answer(s) from "
         f"{len(raw_results)} OCR line(s)."
     )
-    return structured_answers
+    return sorted(structured_answers, key=lambda answer: answer["questionNumber"])
 
 
 _EXPLICIT_OCR_QUESTION_HEADER = re.compile(
-    r"^\s*(?:q(?:uestion)?|[yYgGbB])\s*#?\s*0?(\d{1,2})\b\s*[:.)\-]?\s*(.*)$",
+    r"^\s*(?:q(?:uestion)?|[yYgGbB4])\s*#?\s*0?(\d{1,2})\b\s*[:.)\-]?\s*(.*)$",
     re.IGNORECASE,
 )
 _NUMBERED_QUESTION_HEADER = re.compile(r"^\s*0?(\d{1,2})\s*([:.)\-])\s*(.*)$")
@@ -196,6 +231,7 @@ _BARE_NUMBERED_QUESTION = re.compile(r"^\s*0?(\d{1,2})\s+(.+?)\s*$")
 def _group_ocr_lines_by_question(
     ocr_lines: list[dict],
     expected_question_count: Optional[int] = None,
+    expected_question_texts: Optional[list[str]] = None,
 ) -> dict[int, list[dict]]:
     """Split page-ordered OCR lines before language-model correction can rewrite labels."""
     groups: dict[int, list[dict]] = {}
@@ -203,6 +239,22 @@ def _group_ocr_lines_by_question(
 
     for item in ocr_lines:
         text = item["text"].strip()
+        prompt_number = _match_question_prompt(
+            text,
+            expected_question_texts,
+        )
+        if prompt_number is not None:
+            if prompt_number == current_question:
+                continue
+            current_question = prompt_number
+            groups.setdefault(current_question, [])
+            continue
+        if _is_short_question_heading(text):
+            next_question = (current_question or 0) + 1
+            if expected_question_count is None or next_question <= expected_question_count:
+                current_question = next_question
+                groups.setdefault(current_question, [])
+                continue
         explicit_header = _EXPLICIT_OCR_QUESTION_HEADER.match(text)
         numbered_header = _NUMBERED_QUESTION_HEADER.match(text)
 
@@ -242,9 +294,84 @@ def _group_ocr_lines_by_question(
     return groups
 
 
+_QUESTION_LEAD_IN = re.compile(
+    r"^(?:what|who|where|when|why|how|define|explain|describe|discuss|"
+    r"compare|differentiate|distinguish|list|state|name|identify|write|"
+    r"give|mention|outline|elaborate|question|q)\b",
+    re.IGNORECASE,
+)
+_PROMPT_STOP_WORDS = {
+    "a", "an", "and", "are", "between", "can", "define", "describe",
+    "discuss", "do", "does", "explain", "for", "from", "give", "how",
+    "in", "is", "it", "list", "me", "of", "on", "or", "the", "this",
+    "to", "under", "what", "when", "where", "which", "who", "why",
+    "with", "write",
+}
+
+
+def _is_short_question_heading(line: str) -> bool:
+    return line.endswith("?") and len(line) < 120
+
+
+def _prompt_tokens(text: str) -> set[str]:
+    normalized = text.lower()
+    normalized = re.sub(r"\bartificial\s+intelligence\b", " ai ", normalized)
+    normalized = re.sub(r"\bmachine\s+learning\b", " ml ", normalized)
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized)
+        if token not in _PROMPT_STOP_WORDS
+    }
+
+
+def _match_question_prompt(
+    line: str,
+    expected_question_texts: Optional[list[str]],
+) -> Optional[int]:
+    """Match an unnumbered heading to its exam question, even when answered out of order."""
+    if not expected_question_texts:
+        return None
+
+    candidate = line.strip()
+    if len(candidate) > 120:
+        return None
+    if "?" not in candidate and not _QUESTION_LEAD_IN.match(candidate):
+        return None
+
+    candidate_tokens = _prompt_tokens(candidate)
+    if not candidate_tokens:
+        return None
+
+    normalized_candidate = " ".join(sorted(candidate_tokens))
+    matches = []
+    for question_number, question_text in enumerate(expected_question_texts, start=1):
+        expected_tokens = _prompt_tokens(question_text)
+        if not expected_tokens:
+            continue
+
+        overlap = len(expected_tokens & candidate_tokens) / len(expected_tokens)
+        normalized_expected = " ".join(sorted(expected_tokens))
+        similarity = difflib.SequenceMatcher(
+            None,
+            normalized_expected,
+            normalized_candidate,
+        ).ratio()
+        if overlap >= 0.6 or similarity >= 0.72:
+            matches.append((max(overlap, similarity), question_number))
+
+    if not matches:
+        return None
+    matches.sort(reverse=True)
+    if len(matches) > 1 and matches[0][0] - matches[1][0] < 0.1:
+        return None
+
+    return matches[0][1]
+
+
 def extract_answers_from_sheet(
     file_path: str,
     expected_question_count: Optional[int] = None,
+    expected_question_texts: Optional[list[str]] = None,
 ) -> list[dict]:
     try:
         with pdfplumber.open(file_path) as pdf:
@@ -253,6 +380,7 @@ def extract_answers_from_sheet(
         text_answers = _parse_answers_from_lines(
             full_text.splitlines(),
             expected_question_count=expected_question_count,
+            expected_question_texts=expected_question_texts,
         )
     except Exception as error:
         print(f"[pdf_parser] Text-layer extraction failed for {file_path}: {error}")
@@ -270,6 +398,7 @@ def extract_answers_from_sheet(
         ocr_answers = _extract_answers_with_handwriting_ocr(
             file_path,
             expected_question_count=expected_question_count,
+            expected_question_texts=expected_question_texts,
         )
     except Exception as error:
         raise RuntimeError(
