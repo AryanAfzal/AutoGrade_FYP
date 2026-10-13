@@ -1,15 +1,29 @@
-import { IsString, IsNumber, IsOptional, IsArray } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsInt,
+  IsOptional,
+  IsArray,
+  IsDefined,
+  IsIn,
+  Min,
+  ValidateIf,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
+import { QuestionRubricDto } from './question-rubric.dto';
 
 export class CreateQuestionDto {
   @IsString()
+  @IsIn(['mcq', 'descriptive'])
   type: 'mcq' | 'descriptive';
 
   @IsString()
   questionText: string;
 
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
+  @Min(0.01)
   maxMarks: number;
 
   @IsString()
@@ -29,4 +43,10 @@ export class CreateQuestionDto {
 
   @IsOptional()
   options?: { label: string; text: string }[];
+
+  @ValidateIf((question: CreateQuestionDto) => question.type === 'descriptive')
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => QuestionRubricDto)
+  rubric: QuestionRubricDto;
 }

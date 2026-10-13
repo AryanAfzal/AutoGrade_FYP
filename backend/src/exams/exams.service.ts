@@ -18,6 +18,44 @@ export class ExamsService {
       throw new UnauthorizedException('You may create exams only for subjects assigned to your approved teacher account.');
     }
 
+    for (const [index, question] of dto.questions.entries()) {
+      if (question.type !== 'descriptive') continue;
+      const rubric = question.rubric;
+      if (!rubric?.concepts?.length) {
+        throw new BadRequestException(`Question ${index + 1} must have at least one rubric concept.`);
+      }
+
+      const rubricMarks = rubric.concepts.reduce((sum, concept) => sum + concept.maxMarks, 0);
+      if (Math.abs(rubricMarks - question.maxMarks) > 0.01) {
+        throw new BadRequestException(
+          `Question ${index + 1} rubric concept marks must add up to the question's ${question.maxMarks} marks.`,
+        );
+      }
+
+      if (
+        rubric.concepts.some(
+          (concept) =>
+            !concept.name.trim() ||
+            (!concept.description.trim() && !(concept.keywords || []).length),
+        )
+      ) {
+        throw new BadRequestException(
+          `Each rubric concept in question ${index + 1} needs a name and a description or at least one keyword.`,
+        );
+      }
+
+      const scoringWeights = rubric.scoringWeights;
+      if (!scoringWeights) {
+        throw new BadRequestException(`Question ${index + 1} rubric scoring weights are required.`);
+      }
+      const { semantic, keywords, concepts } = scoringWeights;
+      if (Math.abs(semantic + keywords + concepts - 1) > 0.001) {
+        throw new BadRequestException(
+          `Question ${index + 1} rubric scoring weights must add up to 100%.`,
+        );
+      }
+    }
+
     const exam = this.examRepo.create({
       title: dto.title,
       course: dto.course,
