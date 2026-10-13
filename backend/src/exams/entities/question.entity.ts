@@ -32,4 +32,20 @@ export class Question {
 
   @Column('jsonb', { nullable: true })
   options: { label: string; text: string }[];
+
+  @Column('jsonb', { nullable: true })
+  rubric: {
+    concepts: {
+      name: string;
+      description: string;
+      keywords: string[];
+      maxMarks: number;
+      strictness: 'lenient' | 'balanced' | 'strict';
+    }[];
+    scoringWeights: {
+      semantic: number;
+      keywords: number;
+      concepts: number;
+    };
+  } | null;
 }
