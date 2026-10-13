@@ -47,19 +47,10 @@ export const authApi = {
     return handleResponse<{ token: string; user: import('@/types').User }>(res);
   },
 
-  getRegistrationOptions: async () => {
-    const res = await fetch(`${BASE_URL}/auth/lookup`, {
-      headers: authHeaders(),
-    });
-    return handleResponse<{ teachers: import('@/types').RegistrationOption[]; courses: string[] }>(res);
-  },
-
   registerStudent: async (payload: {
     fullName: string;
     email: string;
     password: string;
-    course: string;
-    teacherId: string;
   }) => {
     const res = await fetch(`${BASE_URL}/auth/register/student`, {
       method: 'POST',
@@ -92,6 +83,35 @@ export const authApi = {
     return handleResponse<import('@/types').TeacherApplication[]>(res);
   },
 
+  getStudentApplications: async () => {
+    const res = await fetch(`${BASE_URL}/auth/student-applications`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').StudentApplication[]>(res);
+  },
+
+  updateStudentApplication: async (
+    id: string,
+    status: 'APPROVED' | 'REJECTED',
+    rollNumber?: string,
+    reason?: string,
+  ) => {
+    const res = await fetch(`${BASE_URL}/auth/student-applications/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status, rollNumber, reason }),
+    });
+    return handleResponse<{
+      message: string;
+      student: {
+        id: string;
+        status: string;
+        rollNumber: string | null;
+        rejectionReason: string | null;
+      };
+    }>(res);
+  },
+
   updateTeacherApplication: async (
     id: string,
     status: 'APPROVED' | 'REJECTED',
@@ -118,7 +138,26 @@ export const authApi = {
     const res = await fetch(`${BASE_URL}/auth/teacher-requests`, {
       headers: authHeaders(),
     });
-    return handleResponse<import('@/types').RegistrationRequest[]>(res);
+    return handleResponse<import('@/types').TeacherEnrollmentRequest[]>(res);
+  },
+
+  getEnrollmentOptions: async () => {
+    const res = await fetch(`${BASE_URL}/auth/enrollment-options`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<{
+      offerings: import('@/types').EnrollmentOffering[];
+      enrollments: import('@/types').StudentEnrollment[];
+    }>(res);
+  },
+
+  createStudentEnrollment: async (teacherId: string, subject: string) => {
+    const res = await fetch(`${BASE_URL}/auth/enrollments`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ teacherId, subject }),
+    });
+    return handleResponse<{ message: string }>(res);
   },
 
   updateTeacherRequest: async (id: string, status: 'APPROVED' | 'REJECTED', reason?: string) => {
@@ -127,7 +166,14 @@ export const authApi = {
       headers: authHeaders(),
       body: JSON.stringify({ status, reason }),
     });
-    return handleResponse<{ message: string; user: { id: string; status: string; course: string | null; teacherId: string | null } }>(res);
+    return handleResponse<{ message: string; user: { id: string; status: string; subject: string; teacherId: string } }>(res);
+  },
+
+  getPublishedStudentResults: async () => {
+    const res = await fetch(`${BASE_URL}/student/results`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').PublishedStudentResult[]>(res);
   },
 
   logout: () => {

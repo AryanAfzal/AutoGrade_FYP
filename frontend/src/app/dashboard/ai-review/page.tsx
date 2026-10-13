@@ -364,7 +364,9 @@ function AIReviewContent() {
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-sm font-semibold text-[#1A1A1A]">{result.studentName}</p>
-                          <p className="text-xs text-[#888888]">{result.registrationNo}</p>
+                          <p className="text-xs text-[#888888]">
+                            Roll no. on paper: {result.registrationNo || 'Not detected'}
+                          </p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-bold text-[#005461]">
@@ -418,7 +420,9 @@ function AIReviewContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 className="text-base font-semibold text-[#1A1A1A]">{selectedStudent.studentName}</h3>
-                      <p className="text-sm text-[#888888]">{selectedStudent.registrationNo}</p>
+                      <p className="text-sm text-[#888888]">
+                        Roll no. on paper: {selectedStudent.registrationNo || 'Not detected'}
+                      </p>
                     </div>
                     {selectedStudent.reviewCompletedAt ? (
                       <Badge variant="success">Done · ready to publish</Badge>

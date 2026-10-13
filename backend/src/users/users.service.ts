@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { User, UserAccountStatus } from './entities/user.entity';
 
 @Injectable()
@@ -15,23 +15,23 @@ export class UsersService {
     return this.repo.findOne({ where: { id } });
   }
 
+  findByRollNumber(rollNumber: string) {
+    return this.repo
+      .createQueryBuilder('user')
+      .where('LOWER(TRIM(user.rollNumber)) = :rollNumber', {
+        rollNumber: rollNumber.trim().toLowerCase(),
+      })
+      .getOne();
+  }
+
   findByRole(role: User['role']) {
     return this.repo.find({ where: { role } });
   }
 
-  findStudentRegistrationRequests(teacherId?: string) {
-    const where: any = {
-      role: 'student',
-      status: In(['PENDING', 'APPROVED', 'REJECTED']),
-    };
-
-    if (teacherId) {
-      where.teacherId = teacherId;
-    }
-
+  findStudentApplications() {
     return this.repo.find({
-      where,
-      order: { requestedAt: 'DESC' as const },
+      where: { role: 'student' },
+      order: { requestedAt: 'DESC' },
     });
   }
 

@@ -7,10 +7,14 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { RolesGuard } from './guards/roles.guard';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { StudentEnrollment } from '../users/entities/student-enrollment.entity';
+import { Exam } from '../exams/entities/exam.entity';
 
 @Module({
   imports: [
     UsersModule,
+    TypeOrmModule.forFeature([StudentEnrollment, Exam]),
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],

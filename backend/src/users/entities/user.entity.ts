@@ -37,6 +37,9 @@ export class User {
   @Column({ nullable: true })
   teacherId: string | null;
 
+  @Column({ nullable: true, unique: true })
+  rollNumber: string | null;
+
   @Column({ nullable: true })
   rejectionReason: string | null;
 

@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, MinLength } from 'class-validator';
 
 export class RegisterStudentDto {
   @IsString()
@@ -12,15 +12,4 @@ export class RegisterStudentDto {
   @MinLength(6)
   password: string;
 
-  @IsOptional()
-  @IsString()
-  confirmPassword?: string;
-
-  @IsString()
-  @MinLength(2)
-  course: string;
-
-  @IsString()
-  @MinLength(1)
-  teacherId: string;
 }

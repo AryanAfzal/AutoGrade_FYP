@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FilePlus, Upload, ClipboardCheck, BarChart3, BookOpen, Clock, X, UserCheck } from 'lucide-react';
+import { FilePlus, Upload, ClipboardCheck, BarChart3, BookOpen, Clock, X, UserCheck, AlertCircle } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
 import { authApi, examApi } from '@/lib/api';
-import type { Exam, RegistrationRequest, User } from '@/types';
+import type { Exam, TeacherEnrollmentRequest, User } from '@/types';
 import { formatDate } from '@/lib/utils';
 
 const quickActions = [
@@ -32,9 +33,12 @@ export default function TeacherDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [exams, setExams] = useState<Exam[]>([]);
-  const [requests, setRequests] = useState<RegistrationRequest[]>([]);
+  const [requests, setRequests] = useState<TeacherEnrollmentRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingIds, setProcessingIds] = useState<string[]>([]);
+  const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
+  const [requestError, setRequestError] = useState('');
+  const [requestNotice, setRequestNotice] = useState('');
 
   useEffect(() => {
     const raw = localStorage.getItem('user');
@@ -78,11 +82,16 @@ export default function TeacherDashboardPage() {
 
   const handleRequestDecision = async (id: string, status: 'APPROVED' | 'REJECTED') => {
     setProcessingIds((current) => [...current, id]);
+    setRequestError('');
+    setRequestNotice('');
     try {
-      await authApi.updateTeacherRequest(id, status);
+      const result = await authApi.updateTeacherRequest(id, status, rejectionReasons[id]);
       setRequests((current) =>
         current.map((request) => (request.id === id ? { ...request, status } : request))
       );
+      setRequestNotice(result.message);
+    } catch (error: unknown) {
+      setRequestError(error instanceof Error ? error.message : 'Unable to update the enrollment request.');
     } finally {
       setProcessingIds((current) => current.filter((item) => item !== id));
     }
@@ -97,7 +106,7 @@ export default function TeacherDashboardPage() {
       <div>
         <h2 className="text-2xl font-bold text-[#1A1A1A]">Good day, Teacher</h2>
         <p className="text-sm text-[#888888] mt-1">
-          Here&apos;s what&apos;s happening with your exams and student registrations today.
+          Here&apos;s what&apos;s happening with your exams and subject enrollment requests today.
         </p>
       </div>
 
@@ -171,14 +180,25 @@ export default function TeacherDashboardPage() {
           <h3 className="text-base font-semibold text-[#1A1A1A]">Student Registration Requests</h3>
         </div>
 
+        {requestError && (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            <AlertCircle size={15} className="mr-2 inline" />{requestError}
+          </p>
+        )}
+        {requestNotice && (
+          <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {requestNotice}
+          </p>
+        )}
+
         {requests.length === 0 ? (
           <Card>
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <div className="w-12 h-12 bg-[#FFF8EB] rounded-full flex items-center justify-center">
                 <BookOpen size={20} className="text-[#005461]" />
               </div>
-              <p className="text-sm font-medium text-[#1A1A1A]">No student registrations found</p>
-              <p className="text-xs text-[#888888]">New requests will appear here once students submit a registration.</p>
+              <p className="text-sm font-medium text-[#1A1A1A]">No subject enrollment requests found</p>
+              <p className="text-xs text-[#888888]">Approved students&apos; requests to enroll in your subjects will appear here.</p>
             </div>
           </Card>
         ) : (
@@ -193,9 +213,11 @@ export default function TeacherDashboardPage() {
                     <div>
                       <p className="text-sm font-semibold text-[#1A1A1A]">{request.fullName}</p>
                       <div className="flex flex-wrap items-center gap-2 mt-0.5 text-xs text-[#888888]">
+                        <span className="font-semibold text-[#005461]">Roll no: {request.rollNumber || 'Unassigned'}</span>
+                        <span className="text-[#E8DCC8]">·</span>
                         <span>{request.email}</span>
                         <span className="text-[#E8DCC8]">·</span>
-                        <span>{request.course || 'No course'}</span>
+                        <span>{request.subject}</span>
                         <span className="text-[#E8DCC8]">·</span>
                         <span>{request.requestedAt ? formatDate(request.requestedAt) : 'Just now'}</span>
                       </div>
@@ -205,7 +227,7 @@ export default function TeacherDashboardPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <Badge variant={statusVariant[request.status]}>{request.status}</Badge>
                     {request.status === 'PENDING' && (
-                      <>
+                      <div className="flex flex-wrap items-center gap-2">
                         <Button
                           variant="secondary"
                           size="sm"
@@ -218,14 +240,28 @@ export default function TeacherDashboardPage() {
                           variant="danger"
                           size="sm"
                           loading={processingIds.includes(request.id)}
+                          disabled={!(rejectionReasons[request.id] || '').trim()}
                           onClick={() => handleRequestDecision(request.id, 'REJECTED')}
                         >
                           Reject
                         </Button>
-                      </>
+                      </div>
                     )}
                   </div>
                 </div>
+                {request.status === 'PENDING' && (
+                  <div className="mt-3 max-w-sm">
+                    <Input
+                      label="Rejection reason (required to reject)"
+                      value={rejectionReasons[request.id] || ''}
+                      onChange={(event) => setRejectionReasons((current) => ({ ...current, [request.id]: event.target.value }))}
+                      placeholder="Explain why this enrollment is rejected"
+                    />
+                  </div>
+                )}
+                {request.status === 'REJECTED' && request.rejectionReason && (
+                  <p className="mt-2 text-xs text-red-700">Rejection reason: {request.rejectionReason}</p>
+                )}
               </Card>
             ))}
           </div>
