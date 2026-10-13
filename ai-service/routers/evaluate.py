@@ -79,6 +79,7 @@ def evaluate_endpoint(body: EvaluateRequest):
     student_answers = extract_answers_from_sheet(
         body.filePath,
         expected_question_count=len(body.questions),
+        expected_question_texts=[question.questionText for question in body.questions],
     )
     logger.info(
         "Answer extraction finished: sheet=%s answers=%s elapsed=%.1fs",
