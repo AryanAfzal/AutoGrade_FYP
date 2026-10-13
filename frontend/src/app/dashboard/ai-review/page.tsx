@@ -328,7 +328,37 @@ function AIReviewContent() {
                           <p className="text-[#888888]">Confidence</p>
                           <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.confidence * 100)}%</p>
                         </div>
+                        {entry.conceptScore !== undefined && (
+                          <div>
+                            <p className="text-[#888888]">Rubric coverage</p>
+                            <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.conceptScore * 100)}%</p>
+                          </div>
+                        )}
                       </div>
+
+                      {!!entry.rubricBreakdown?.length && (
+                        <div className="space-y-2 rounded-lg border border-[#E8DCC8] bg-[#FFFDF8] p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-[#005461]">
+                            Rubric breakdown
+                          </p>
+                          {entry.rubricBreakdown.map((concept) => (
+                            <div
+                              key={concept.conceptName}
+                              className="flex flex-wrap items-center justify-between gap-2 border-t border-[#E8DCC8] pt-2 text-sm"
+                            >
+                              <div>
+                                <p className="font-medium text-[#1A1A1A]">{concept.conceptName}</p>
+                                <p className="text-xs text-[#888888]">
+                                  {concept.status} · {concept.strictness} · {Math.round(concept.coverage * 100)}% coverage
+                                </p>
+                              </div>
+                              <Badge variant={concept.status === 'addressed' ? 'success' : concept.status === 'partially addressed' ? 'warning' : 'danger'}>
+                                {concept.awardedMarks}/{concept.maxMarks} marks
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="bg-white rounded border border-[#E8DCC8] p-3">
                         <p className="text-xs font-medium text-[#888888] mb-1">Student Answer:</p>
@@ -336,6 +366,12 @@ function AIReviewContent() {
                           {entry.studentAnswer?.trim() || 'No answer was extracted for this question.'}
                         </p>
                       </div>
+                      {entry.feedback && (
+                        <div className="rounded border border-[#E8DCC8] bg-white p-3">
+                          <p className="mb-1 text-xs font-medium text-[#888888]">Rubric feedback draft</p>
+                          <p className="text-sm text-[#1A1A1A]">{entry.feedback}</p>
+                        </div>
+                      )}
                     </div>
                   </Card>
                 ))}

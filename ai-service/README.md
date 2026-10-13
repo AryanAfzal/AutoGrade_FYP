@@ -2,6 +2,19 @@
 
 The evaluation service combines SBERT answer scoring with the handwritten answer-sheet OCR pipeline migrated from `OCR_SYSTEM-main`.
 
+## Descriptive-answer rubrics
+
+Each descriptive question can define named rubric concepts with a short evidence description, optional
+concept keywords, an allocated mark weight, and a strictness level (`lenient`, `balanced`, or `strict`).
+The concept mark allocations must add up to the question's maximum marks. Rubric scoring weights for
+reference-answer similarity, keyword evidence, and concept coverage must add up to 100%.
+
+For each concept, available scoring signals are combined using the configured rubric weights. Strictness
+sets the evidence threshold used to calculate proportional checkpoint marks (20%, 35%, or 50% for
+lenient, balanced, or strict). Checkpoint marks are summed to produce the AI question mark. The evaluation
+response includes the per-concept coverage, awarded marks, status, an overall concept-coverage score,
+and a student-readable feedback draft. These remain AI suggestions for teacher review.
+
 ## Handwritten answer-sheet flow
 
 When PDF text extraction returns fewer answer entries than the exam has questions, the service:

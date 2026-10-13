@@ -2,23 +2,43 @@ import os
 import logging
 import time
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
 from services.pdf_parser import extract_answers_from_sheet
 from services.evaluator import evaluate_answer_sheet
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+class RubricConceptPayload(BaseModel):
+    name: str
+    description: str
+    keywords: list[str] = Field(default_factory=list)
+    maxMarks: float
+    strictness: Literal["lenient", "balanced", "strict"] = "balanced"
+
+
+class RubricScoringWeightsPayload(BaseModel):
+    semantic: float
+    keywords: float
+    concepts: float
+
+
+class QuestionRubricPayload(BaseModel):
+    concepts: list[RubricConceptPayload]
+    scoringWeights: RubricScoringWeightsPayload
+
+
 class QuestionPayload(BaseModel):
-    id:              str
-    type:            str          # 'mcq' | 'descriptive'
-    questionText:    str
-    maxMarks:        int
-    clo:             str
-    correctAnswer:   Optional[str] = None
+    id: str
+    type: str
+    questionText: str
+    maxMarks: float
+    clo: str
+    correctAnswer: Optional[str] = None
     referenceAnswer: Optional[str] = None
-    keywords:        Optional[list[str]] = None
+    keywords: Optional[list[str]] = None
+    rubric: Optional[QuestionRubricPayload] = None
 
 
 class EvaluateRequest(BaseModel):
