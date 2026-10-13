@@ -82,6 +82,43 @@ export class EvaluationService {
     }));
   }
 
+  async getPublishedStudentResults(user: User) {
+    if (user.role !== 'student' || user.status !== 'APPROVED' || !user.rollNumber) {
+      throw new BadRequestException(
+        'Your student account must be approved and have a roll number to view results.',
+      );
+    }
+
+    const results = await this.resultRepo
+      .createQueryBuilder('result')
+      .innerJoinAndSelect('result.answerSheet', 'answerSheet')
+      .innerJoinAndSelect('answerSheet.exam', 'exam')
+      .leftJoinAndSelect('result.entries', 'entry')
+      .where('result.status = :status', { status: 'approved' })
+      .andWhere('LOWER(TRIM(answerSheet.registrationNo)) = :rollNumber', {
+        rollNumber: user.rollNumber.trim().toLowerCase(),
+      })
+      .orderBy('result.publishedAt', 'DESC', 'NULLS LAST')
+      .getMany();
+
+    return results.map((result) => ({
+      examId: result.answerSheet.exam.id,
+      examTitle: result.answerSheet.exam.title,
+      subject: result.answerSheet.exam.course,
+      term: result.answerSheet.exam.term,
+      rollNumber: result.answerSheet.registrationNo,
+      totalMarks: result.totalApprovedMark,
+      maxMarks: result.totalMaxMarks,
+      publishedAt: result.publishedAt,
+      questions: result.entries.map((entry) => ({
+        questionText: entry.questionText,
+        mark: entry.approvedMark,
+        maxMarks: entry.maxMarks,
+        feedback: entry.feedback,
+      })),
+    }));
+  }
+
   async triggerEvaluation(
     examId: string,
     user: User,
@@ -513,6 +550,10 @@ export class EvaluationService {
         result.status = 'approved';
       }
 
+      const publishedAt = new Date();
+      for (const result of completedResults) {
+        result.publishedAt = publishedAt;
+      }
       const completedSheetIds = completedResults.map(
         (result) => result.answerSheet.id,
       );
@@ -525,8 +566,7 @@ export class EvaluationService {
       const allResultsPublished =
         results.length === sheets.length &&
         results.every((result) => result.status === 'approved');
-      const publishedAt = allResultsPublished ? new Date() : null;
-      if (publishedAt) {
+      if (allResultsPublished) {
         exam.status = 'published';
         exam.publishedAt = publishedAt;
         await examRepo.save(exam);

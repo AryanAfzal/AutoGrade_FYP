@@ -15,6 +15,8 @@ import { RegisterTeacherDto } from './dto/register-teacher.dto';
 import { UpdateTeacherApplicationDto } from './dto/update-teacher-application.dto';
 import { AssignTeacherSubjectsDto } from './dto/assign-teacher-subjects.dto';
 import { UpdateRegistrationStatusDto } from './dto/update-registration-status.dto';
+import { UpdateStudentApplicationDto } from './dto/update-student-application.dto';
+import { CreateStudentEnrollmentDto } from './dto/create-student-enrollment.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
@@ -39,19 +41,12 @@ export class AuthController {
     return this.authService.getCurrentUser(req.user.id);
   }
 
-  @Get('lookup')
-  getRegistrationOptions() {
-    return this.authService.getRegistrationOptions();
-  }
-
   @Post('register/student')
   registerStudent(@Body() dto: RegisterStudentDto) {
     return this.authService.registerStudent({
       fullName: dto.fullName,
       email: dto.email,
       password: dto.password,
-      course: dto.course,
-      teacherId: dto.teacherId,
     });
   }
 
@@ -81,11 +76,51 @@ export class AuthController {
     return this.authService.assignTeacherSubjects(id, dto.subjects);
   }
 
+  @Get('student-applications')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  getStudentApplications() {
+    return this.authService.getStudentApplications();
+  }
+
+  @Patch('student-applications/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  updateStudentApplication(
+    @Param('id') id: string,
+    @Body() dto: UpdateStudentApplicationDto,
+  ) {
+    return this.authService.updateStudentApplication(
+      id,
+      dto.status,
+      dto.rollNumber,
+      dto.reason,
+    );
+  }
+
+  @Get('enrollment-options')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('student')
+  getEnrollmentOptions(@Request() req) {
+    return this.authService.getEnrollmentOptions(req.user.id);
+  }
+
+  @Post('enrollments')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('student')
+  createStudentEnrollment(@Body() dto: CreateStudentEnrollmentDto, @Request() req) {
+    return this.authService.createStudentEnrollment(
+      req.user.id,
+      dto.teacherId,
+      dto.subject,
+    );
+  }
+
   @Get('teacher-requests')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('teacher')
   getTeacherRequests(@Request() req) {
-    return this.authService.getTeacherRequests(req.user.id, false);
+    return this.authService.getTeacherRequests(req.user.id);
   }
 
   @Patch('teacher-requests/:id')

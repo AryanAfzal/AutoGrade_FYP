@@ -1,28 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { BookOpen, GraduationCap } from 'lucide-react';
-import type { RegistrationOption } from '@/types';
+import { GraduationCap } from 'lucide-react';
 
 interface StudentRegistrationForm {
   fullName: string;
   email: string;
   password: string;
   confirmPassword: string;
-  course: string;
-  teacherId: string;
 }
 
 export default function StudentRegistrationPage() {
   const router = useRouter();
-  const [teachers, setTeachers] = useState<RegistrationOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingOptions, setLoadingOptions] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -31,25 +26,7 @@ export default function StudentRegistrationPage() {
     handleSubmit,
     formState: { errors },
     watch,
-    setValue,
   } = useForm<StudentRegistrationForm>();
-  const selectedTeacherId = watch('teacherId');
-  const selectedTeacher = teachers.find((teacher) => teacher.id === selectedTeacherId);
-
-  useEffect(() => {
-    const loadOptions = async () => {
-      try {
-        const response = await authApi.getRegistrationOptions();
-        setTeachers(response.teachers);
-      } catch {
-        setError('Unable to load teachers and courses right now.');
-      } finally {
-        setLoadingOptions(false);
-      }
-    };
-
-    loadOptions();
-  }, []);
 
   const passwordValue = watch('password');
 
@@ -68,8 +45,6 @@ export default function StudentRegistrationPage() {
         fullName: data.fullName,
         email: data.email,
         password: data.password,
-        course: data.course,
-        teacherId: data.teacherId,
       });
       setSuccess(response.message);
       setTimeout(() => router.push('/login'), 1800);
@@ -97,18 +72,7 @@ export default function StudentRegistrationPage() {
           </div>
         </div>
 
-        {loadingOptions ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-8 h-8 border-2 border-[#005461] border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            {teachers.length === 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                No approved teachers have subjects assigned yet. Please check back after an administrator assigns subjects.
-              </div>
-            )}
-
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Full Name"
@@ -159,53 +123,6 @@ export default function StudentRegistrationPage() {
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-[#1A1A1A]">Course</label>
-                <select
-                  {...register('course', {
-                    required: 'Subject is required',
-                    validate: (value) => selectedTeacher?.subjects.includes(value) || 'Select a subject assigned to the chosen teacher',
-                  })}
-                  className="w-full border border-[#E8DCC8] bg-[#FFFDF9] rounded-xl px-4 py-3 text-sm text-[#1A1A1A] focus:border-[#005461] focus:outline-none"
-                  defaultValue=""
-                >
-                  <option value="" disabled>
-                    Select a subject
-                  </option>
-                  {(selectedTeacher?.subjects || []).map((course) => (
-                    <option key={course} value={course}>
-                      {course}
-                    </option>
-                  ))}
-                </select>
-                {errors.course && <p className="text-xs text-red-500 mt-1">{errors.course.message}</p>}
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-[#1A1A1A]">Assigned teacher</label>
-                <select
-                  {...register('teacherId', { required: 'Teacher is required' })}
-                  onChange={(event) => {
-                    setValue('teacherId', event.target.value, { shouldValidate: true });
-                    setValue('course', '');
-                  }}
-                  className="w-full border border-[#E8DCC8] bg-[#FFFDF9] rounded-xl px-4 py-3 text-sm text-[#1A1A1A] focus:border-[#005461] focus:outline-none"
-                  defaultValue=""
-                >
-                  <option value="" disabled>
-                    Select a teacher with an assigned subject
-                  </option>
-                  {teachers.map((teacher) => (
-                    <option key={teacher.id} value={teacher.id}>
-                      {teacher.fullName}
-                    </option>
-                  ))}
-                </select>
-                {errors.teacherId && <p className="text-xs text-red-500 mt-1">{errors.teacherId.message}</p>}
-              </div>
-            </div>
-
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
                 <p className="text-sm text-red-600">{error}</p>
@@ -222,16 +139,14 @@ export default function StudentRegistrationPage() {
               <Button type="button" variant="secondary" onClick={() => router.push('/login')}>
                 Back to Login
               </Button>
-              <Button type="submit" loading={loading} disabled={teachers.length === 0} className="flex-1">
+              <Button type="submit" loading={loading} className="flex-1">
                 Submit Registration
               </Button>
             </div>
           </form>
-        )}
 
-        <div className="mt-6 flex items-center gap-2 text-xs text-[#888888]">
-          <BookOpen size={14} className="text-[#005461]" />
-          <span>Registration requests are reviewed by the assigned teacher.</span>
+        <div className="mt-6 text-xs text-[#888888]">
+          <span>An administrator will review your account and assign your student roll number. Once approved, you can request enrollment in available subjects.</span>
         </div>
       </div>
     </div>

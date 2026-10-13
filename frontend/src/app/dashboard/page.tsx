@@ -7,7 +7,7 @@ import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import { authApi, examApi } from '@/lib/api';
-import type { Exam, RegistrationRequest, User } from '@/types';
+import type { Exam, TeacherEnrollmentRequest, User } from '@/types';
 import { formatDate } from '@/lib/utils';
 
 const quickActions = [
@@ -32,7 +32,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [exams, setExams] = useState<Exam[]>([]);
-  const [requests, setRequests] = useState<RegistrationRequest[]>([]);
+  const [requests, setRequests] = useState<TeacherEnrollmentRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingIds, setProcessingIds] = useState<string[]>([]);
 
@@ -177,7 +177,9 @@ export default function DashboardPage() {
                       <div className="flex flex-wrap items-center gap-2 mt-0.5 text-xs text-[#888888]">
                         <span>{request.email}</span>
                         <span className="text-[#E8DCC8]">·</span>
-                        <span>{request.course || 'No course'}</span>
+                        <span>{request.rollNumber || 'No roll number'}</span>
+                        <span className="text-[#E8DCC8]">·</span>
+                        <span>{request.subject}</span>
                         <span className="text-[#E8DCC8]">·</span>
                         <span>{request.requestedAt ? formatDate(request.requestedAt) : 'Just now'}</span>
                       </div>

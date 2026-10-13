@@ -8,6 +8,7 @@ export interface User {
   email: string;
   role: UserRole;
   status?: UserAccountStatus;
+  rollNumber?: string | null;
   course?: string | null;
   teacherId?: string | null;
   department?: string | null;
@@ -18,13 +19,6 @@ export interface User {
 export interface AuthResponse {
   token: string;
   user: User;
-}
-
-export interface RegistrationOption {
-  id: string;
-  fullName: string;
-  email: string;
-  subjects: string[];
 }
 
 export interface TeacherApplication {
@@ -41,16 +35,60 @@ export interface TeacherApplication {
   assignedSubjects: string[];
 }
 
-export interface RegistrationRequest {
+export interface TeacherEnrollmentRequest {
   id: string;
   fullName: string;
   email: string;
-  course: string | null;
+  rollNumber: string | null;
+  subject: string;
   status: UserAccountStatus;
-  teacherId: string | null;
+  requestedAt: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+}
+
+export interface StudentApplication {
+  id: string;
+  fullName: string;
+  email: string;
+  status: UserAccountStatus;
+  rollNumber: string | null;
   requestedAt: string | null;
   approvedAt: string | null;
   rejectionReason: string | null;
+}
+
+export interface EnrollmentOffering {
+  teacherId: string;
+  teacherName: string;
+  subject: string;
+}
+
+export interface StudentEnrollment {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  subject: string;
+  status: UserAccountStatus;
+  rejectionReason: string | null;
+  requestedAt: string;
+}
+
+export interface PublishedStudentResult {
+  examId: string;
+  examTitle: string;
+  subject: string;
+  term: string;
+  rollNumber: string;
+  totalMarks: number | null;
+  maxMarks: number;
+  publishedAt: string | null;
+  questions: {
+    questionText: string;
+    mark: number | null;
+    maxMarks: number;
+    feedback: string | null;
+  }[];
 }
 
 // EXAM

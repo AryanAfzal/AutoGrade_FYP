@@ -22,6 +22,9 @@ export class StudentResult {
   @Column({ type: 'timestamp', nullable: true })
   reviewCompletedAt: Date | null;
 
+  @Column({ type: 'timestamp', nullable: true })
+  publishedAt: Date | null;
+
   @Column({ default: 'awaiting_approval' })
   status: string;
 
