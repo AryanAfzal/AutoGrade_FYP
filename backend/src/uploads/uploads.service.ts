@@ -7,11 +7,17 @@ import * as path from 'path';
 import { UsersService } from '../users/users.service';
 
 function extractRollNumberFromFilename(fileName: string): string | null {
-  const match = fileName.match(
+  const fullMatch = fileName.match(
+    /(?:^|[^A-Z0-9])((?:SP|FA)\s*\d{2})[\s_-]+([A-Z]{2,4})[\s_-]+(\d{1,4})(?!\d)/i,
+  );
+  if (fullMatch) {
+    return `${fullMatch[1].replace(/\s+/g, '').toUpperCase()}-${fullMatch[2].toUpperCase()}-${fullMatch[3]}`;
+  }
+  const shortMatch = fileName.match(
     /(?:^|[^A-Z0-9])((?:SP|FA)\s*\d{2})[\s_-]+(\d{1,4})(?!\d)/i,
   );
-  if (!match) return null;
-  return `${match[1].replace(/\s+/g, '').toUpperCase()}-${match[2]}`;
+  if (!shortMatch) return null;
+  return `${shortMatch[1].replace(/\s+/g, '').toUpperCase()}-${shortMatch[2]}`;
 }
 
 @Injectable()

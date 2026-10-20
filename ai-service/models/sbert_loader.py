@@ -4,14 +4,27 @@ import numpy as np
 from numpy.linalg import norm
 
 MODEL_NAME = "all-MiniLM-L6-v2"
-LOCAL_MODEL_DIR = Path(__file__).resolve().parent.parent / "model_files" / MODEL_NAME
+BACKEND_MODELS_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "backend"
+    / "src"
+    / "Models"
+    / MODEL_NAME
+)
+FALLBACK_MODEL_DIR = (
+    Path(__file__).resolve().parent.parent / "model_files" / MODEL_NAME
+)
+LOCAL_MODEL_DIR = (
+    BACKEND_MODELS_DIR if BACKEND_MODELS_DIR.exists() else FALLBACK_MODEL_DIR
+)
 
 if LOCAL_MODEL_DIR.exists():
     print(f"[sbert_loader] Loading local model: {LOCAL_MODEL_DIR}")
     _model = SentenceTransformer(str(LOCAL_MODEL_DIR), local_files_only=True)
 else:
-    print(f"[sbert_loader] Local model not found, downloading {MODEL_NAME} ...")
-    _model = SentenceTransformer(MODEL_NAME)
+    raise FileNotFoundError(
+        f"[sbert_loader] Local SBERT model not found at {BACKEND_MODELS_DIR} or {FALLBACK_MODEL_DIR}"
+    )
 print("[sbert_loader] Model ready.")
 
 

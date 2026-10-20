@@ -1,16 +1,23 @@
-import re
 import difflib
-import pdfplumber
+import os
+import re
 import tempfile
 import time
 from typing import Optional
+
+import pdfplumber
 
 
 def extract_student_info(file_path: str) -> dict:
     student_name = "Unknown"
     reg_no = "Unknown"
-    name_pattern = re.compile(r"(?:student\s*name|name)\s*[:\-]\s*(.+)", re.IGNORECASE)
-    reg_pattern = re.compile(r"(?:reg(?:istration)?\s*(?:no|number|#)|roll\s*no)\s*[:\-]\s*([A-Za-z0-9\-]+)", re.IGNORECASE)
+    name_pattern = re.compile(
+        r"(?:student\s*name|name)\s*[:\-]\s*(.+)", re.IGNORECASE
+    )
+    reg_pattern = re.compile(
+        r"(?:reg(?:istration)?\s*(?:no|number|#)|roll\s*no)\s*[:\-]\s*([A-Za-z0-9\-]+)",
+        re.IGNORECASE,
+    )
     try:
         with pdfplumber.open(file_path) as pdf:
             text = pdf.pages[0].extract_text() or ""
@@ -27,6 +34,18 @@ def extract_student_info(file_path: str) -> dict:
                     break
     except Exception as e:
         print(f"[pdf_parser] extract_student_info error: {e}")
+
+    # Fallback: extract roll number from filename (e.g. SP23-BCS-047.pdf or SP23-047.pdf)
+    if reg_no == "Unknown":
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        roll_match = re.search(
+            r"((?:SP|FA)\s*\d{2}(?:[\s_\-]+[A-Z]{2,4})?[\s_\-]+\d{1,4})",
+            base_name,
+            re.IGNORECASE,
+        )
+        if roll_match:
+            reg_no = re.sub(r"[\s_]+", "-", roll_match.group(1).upper())
+
     return {"studentName": student_name, "registrationNo": reg_no}
 
 
@@ -42,7 +61,10 @@ def _parse_answers_from_lines(
     )
     bare_q = re.compile(r"^Question\s*[:\-]\s*", re.IGNORECASE)
     answer_marker = re.compile(r"^(?:answer|ans)\s*[:\-]", re.IGNORECASE)
-    header_fields = re.compile(r"^(?:name|reg(?:istration)?\s*(?:no|number)?|subject|course|date|roll\s*no)\s*[:\-]", re.IGNORECASE)
+    header_fields = re.compile(
+        r"^(?:name|reg(?:istration)?\s*(?:no|number)?|subject|course|date|roll\s*no)\s*[:\-]",
+        re.IGNORECASE,
+    )
 
     current_q_num: Optional[int] = None
     q_counter = 0
@@ -51,10 +73,12 @@ def _parse_answers_from_lines(
 
     def flush_answer():
         if current_q_num is not None and answer_lines:
-            answers.append({
-                "questionNumber": current_q_num,
-                "answerText": " ".join(answer_lines).strip(),
-            })
+            answers.append(
+                {
+                    "questionNumber": current_q_num,
+                    "answerText": " ".join(answer_lines).strip(),
+                }
+            )
 
     for line in lines:
         line = line.strip()
@@ -74,7 +98,10 @@ def _parse_answers_from_lines(
             continue
         if _is_short_question_heading(line):
             next_question = (current_q_num or 0) + 1
-            if expected_question_count is None or next_question <= expected_question_count:
+            if (
+                expected_question_count is None
+                or next_question <= expected_question_count
+            ):
                 flush_answer()
                 current_q_num = next_question
                 collecting_answer = True
@@ -102,14 +129,11 @@ def _parse_answers_from_lines(
             is_sequential_number = (
                 current_q_num is None and question_number == 1
             ) or (
-                current_q_num is not None and question_number == current_q_num + 1
+                current_q_num is not None
+                and question_number == current_q_num + 1
             )
-            if (
-                question_number <= upper_bound
-                and (
-                    explicit_header
-                    or (is_sequential_number and bare_header_shape)
-                )
+            if question_number <= upper_bound and (
+                explicit_header or (is_sequential_number and bare_header_shape)
             ):
                 flush_answer()
                 current_q_num = question_number
@@ -146,12 +170,21 @@ def _extract_answers_with_handwriting_ocr(
     expected_question_count: Optional[int] = None,
     expected_question_texts: Optional[list[str]] = None,
 ) -> list[dict]:
+    """
+    Full OCR_SYSTEM handwriting pipeline:
+    1. Render PDF pages at 288 DPI (`convert_pdf_to_images`)
+    2. Preprocess pages with dynamic scaling, bilateral filter, CLAHE, unsharp mask (`preprocess_all_images`)
+    3. Extract lines with PaddleOCR + low-confidence (< 0.35) TrOCR refinement + header splitting (`extract_text_from_image`)
+    4. Segment questions using `segment_page_questions` (or prompt matching when present)
+    5. Clean each question's raw OCR lines using `clean_question_answer` (Ollama `qwen2.5:1.5b` with SymSpell fallback)
+    """
     from services.handwriting_ocr import extract_text_from_image
     from services.image_processor import preprocess_all_images
     from services.pdf_converter import convert_pdf_to_images
     from services.text_cleaner import (
-        OLLAMA_CORRECTION_BUDGET_SECONDS,
-        clean_results,
+        clean_question_answer,
+        parse_header_line,
+        segment_page_questions,
     )
 
     document_header = re.compile(
@@ -179,34 +212,69 @@ def _extract_answers_with_handwriting_ocr(
         for page_number, image_path in enumerate(preprocessed_paths, start=1):
             page_started_at = time.perf_counter()
             page_lines = extract_text_from_image(image_path)
-            raw_results.extend(page_lines)
+            filtered_page_lines = [
+                item
+                for item in page_lines
+                if item.get("text")
+                and not document_header.match(item["text"].strip())
+            ]
+            raw_results.extend(filtered_page_lines)
             print(
                 f"[pdf_parser] OCR page {page_number}/{len(preprocessed_paths)} "
-                f"returned {len(page_lines)} line(s) in "
+                f"returned {len(filtered_page_lines)} line(s) in "
                 f"{time.perf_counter() - page_started_at:.1f}s."
             )
 
-    correction_deadline = (
-        time.monotonic() + OLLAMA_CORRECTION_BUDGET_SECONDS
+    # Check if any line matches an unnumbered question prompt from the exam;
+    # otherwise use OCR_SYSTEM's `segment_page_questions` + `infer_sequential_number`.
+    has_prompt_headings = any(
+        _match_question_prompt(item["text"].strip(), expected_question_texts)
+        is not None
+        for item in raw_results
+        if not parse_header_line(item["text"].strip())[0]
     )
-    answer_groups = _group_ocr_lines_by_question(
-        raw_results,
-        expected_question_count=expected_question_count,
-        expected_question_texts=expected_question_texts,
-    )
-    structured_answers = []
-    for question_number, answer_lines in answer_groups.items():
-        usable_lines = [
-            item
-            for item in answer_lines
-            if item["text"].strip() and not document_header.match(item["text"].strip())
-        ]
-        cleaned_lines = clean_results(
-            usable_lines,
-            deadline=correction_deadline,
+
+    if has_prompt_headings:
+        answer_groups = _group_ocr_lines_by_question(
+            raw_results,
+            expected_question_count=expected_question_count,
+            expected_question_texts=expected_question_texts,
         )
-        answer_text = "\n".join(
-            item["text"].strip() for item in cleaned_lines if item["text"].strip()
+    else:
+        segmented = segment_page_questions(raw_results, page_num=1)
+        answer_groups: dict[int, list[dict]] = {}
+        for q_item in segmented:
+            q_num = q_item["question_number"]
+            if (
+                expected_question_count is not None
+                and q_num > expected_question_count
+            ):
+                continue
+            line_dicts = [
+                {"text": line, "confidence": q_item.get("confidence", 0.90)}
+                for line in q_item["raw_lines"]
+            ]
+            if q_num in answer_groups:
+                answer_groups[q_num].extend(line_dicts)
+            else:
+                answer_groups[q_num] = line_dicts
+
+    structured_answers = []
+    for question_number in sorted(answer_groups.keys()):
+        answer_lines = answer_groups[question_number]
+        raw_line_strings = [
+            item["text"].strip()
+            for item in answer_lines
+            if item.get("text")
+            and item["text"].strip()
+            and not document_header.match(item["text"].strip())
+        ]
+        if not raw_line_strings:
+            continue
+
+        question_header = f"Q#{question_number:02d}:"
+        answer_text = clean_question_answer(
+            raw_line_strings, question_header=question_header
         ).strip()
         if answer_text:
             structured_answers.append(
@@ -217,7 +285,9 @@ def _extract_answers_with_handwriting_ocr(
         f"[pdf_parser] Structured {len(structured_answers)} answer(s) from "
         f"{len(raw_results)} OCR line(s)."
     )
-    return sorted(structured_answers, key=lambda answer: answer["questionNumber"])
+    return sorted(
+        structured_answers, key=lambda answer: answer["questionNumber"]
+    )
 
 
 _EXPLICIT_OCR_QUESTION_HEADER = re.compile(
@@ -234,6 +304,8 @@ def _group_ocr_lines_by_question(
     expected_question_texts: Optional[list[str]] = None,
 ) -> dict[int, list[dict]]:
     """Split page-ordered OCR lines before language-model correction can rewrite labels."""
+    from services.text_cleaner import infer_sequential_number, parse_header_line
+
     groups: dict[int, list[dict]] = {}
     current_question: Optional[int] = None
 
@@ -251,14 +323,24 @@ def _group_ocr_lines_by_question(
             continue
         if _is_short_question_heading(text):
             next_question = (current_question or 0) + 1
-            if expected_question_count is None or next_question <= expected_question_count:
+            if (
+                expected_question_count is None
+                or next_question <= expected_question_count
+            ):
                 current_question = next_question
                 groups.setdefault(current_question, [])
                 continue
+
+        is_ocr_header, detected_num, rest = parse_header_line(text)
         explicit_header = _EXPLICIT_OCR_QUESTION_HEADER.match(text)
         numbered_header = _NUMBERED_QUESTION_HEADER.match(text)
 
-        if explicit_header:
+        if is_ocr_header:
+            expected_next = (current_question or 0) + 1
+            question_number = infer_sequential_number(detected_num, expected_next)
+            remainder = rest
+            is_header = True
+        elif explicit_header:
             question_number = int(explicit_header.group(1))
             remainder = explicit_header.group(2).strip()
             is_header = True
@@ -269,8 +351,6 @@ def _group_ocr_lines_by_question(
         else:
             bare_number = _BARE_NUMBERED_QUESTION.match(text)
             question_number = int(bare_number.group(1)) if bare_number else 0
-            # Only treat a short, sequential numeric line as a damaged question
-            # label. Long lines such as "1 The answer is..." remain answer text.
             is_header = bool(
                 bare_number
                 and len(text) <= 24
@@ -344,7 +424,9 @@ def _match_question_prompt(
 
     normalized_candidate = " ".join(sorted(candidate_tokens))
     matches = []
-    for question_number, question_text in enumerate(expected_question_texts, start=1):
+    for question_number, question_text in enumerate(
+        expected_question_texts, start=1
+    ):
         expected_tokens = _prompt_tokens(question_text)
         if not expected_tokens:
             continue
@@ -375,7 +457,9 @@ def extract_answers_from_sheet(
 ) -> list[dict]:
     try:
         with pdfplumber.open(file_path) as pdf:
-            full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            full_text = "\n".join(
+                page.extract_text() or "" for page in pdf.pages
+            )
 
         text_answers = _parse_answers_from_lines(
             full_text.splitlines(),
@@ -383,7 +467,9 @@ def extract_answers_from_sheet(
             expected_question_texts=expected_question_texts,
         )
     except Exception as error:
-        print(f"[pdf_parser] Text-layer extraction failed for {file_path}: {error}")
+        print(
+            f"[pdf_parser] Text-layer extraction failed for {file_path}: {error}"
+        )
         text_answers = []
 
     if expected_question_count is None:
@@ -408,10 +494,14 @@ def extract_answers_from_sheet(
     if not text_answers:
         return ocr_answers
 
-    merged_answers = {answer["questionNumber"]: answer for answer in text_answers}
+    merged_answers = {
+        answer["questionNumber"]: answer for answer in text_answers
+    }
     for answer in ocr_answers:
         existing = merged_answers.get(answer["questionNumber"])
-        if existing is None or len(answer["answerText"]) > len(existing["answerText"]):
+        if existing is None or len(answer["answerText"]) > len(
+            existing["answerText"]
+        ):
             merged_answers[answer["questionNumber"]] = answer
     return [merged_answers[number] for number in sorted(merged_answers)]
 
@@ -419,14 +509,6 @@ def extract_answers_from_sheet(
 def parse_exam_pdf(file_path: str) -> list[dict]:
     """
     Parse exam PDF into question dicts.
-
-    Expected format per question:
-        Q1. [Descriptive] (10 marks) [CLO-1]
-        Subject: Operating System
-        What is an Operating System? Explain its functions.
-        Reference Answer:
-        An Operating System is...
-        Keywords: process management, memory management
     """
     questions = []
 
@@ -434,24 +516,29 @@ def parse_exam_pdf(file_path: str) -> list[dict]:
         r"Q\d+\.\s+\[(\w+)\]\s+\((\d+)\s+marks?\)\s+\[([^\]]+)\]",
         re.IGNORECASE,
     )
-    option_pattern    = re.compile(r"^([A-D])[)\.]\s*(.+)", re.IGNORECASE)
-    correct_ans_pat   = re.compile(r"^correct\s+answer\s*[:\-]\s*(.+)", re.IGNORECASE)
-    ref_ans_pat       = re.compile(r"^reference\s+answer\s*[:\-]", re.IGNORECASE)
-    keyword_pat       = re.compile(r"^keywords?\s*[:\-]\s*(.+)", re.IGNORECASE)
-    subject_pat       = re.compile(r"^subject\s*[:\-]\s*", re.IGNORECASE)
-    skip_pat          = re.compile(r"^(autograde|official answer key|do not distribute)", re.IGNORECASE)
+    option_pattern = re.compile(r"^([A-D])[)\.]\s*(.+)", re.IGNORECASE)
+    correct_ans_pat = re.compile(
+        r"^correct\s+answer\s*[:\-]\s*(.+)", re.IGNORECASE
+    )
+    ref_ans_pat = re.compile(r"^reference\s+answer\s*[:\-]", re.IGNORECASE)
+    keyword_pat = re.compile(r"^keywords?\s*[:\-]\s*(.+)", re.IGNORECASE)
+    subject_pat = re.compile(r"^subject\s*[:\-]\s*", re.IGNORECASE)
+    skip_pat = re.compile(
+        r"^(autograde|official answer key|do not distribute)", re.IGNORECASE
+    )
 
     try:
         with pdfplumber.open(file_path) as pdf:
-            full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            full_text = "\n".join(
+                page.extract_text() or "" for page in pdf.pages
+            )
 
         lines = full_text.splitlines()
         current: Optional[dict] = None
         question_text_lines: list[str] = []
         ref_answer_lines: list[str] = []
 
-        # State flags
-        collecting_ref      = False
+        collecting_ref = False
         collecting_question = False
 
         def flush_question():
@@ -462,7 +549,6 @@ def parse_exam_pdf(file_path: str) -> list[dict]:
                 current["questionText"] = " ".join(question_text_lines).strip()
             if ref_answer_lines:
                 current["referenceAnswer"] = " ".join(ref_answer_lines).strip()
-            # Only append if we have actual question text
             if current.get("questionText"):
                 questions.append(current)
             collecting_ref = False
@@ -473,86 +559,81 @@ def parse_exam_pdf(file_path: str) -> list[dict]:
             if not stripped:
                 continue
 
-            # Skip document header lines
             if skip_pat.match(stripped):
                 continue
 
-            # Skip lines that look like page headers (Course: | Term: | Total Marks:)
-            if re.match(r"^(course|term|total marks)\s*[:\|]", stripped, re.IGNORECASE):
+            if re.match(
+                r"^(course|term|total marks)\s*[:\|]", stripped, re.IGNORECASE
+            ):
                 continue
 
-            # ── New question header ────────────────────────────────────────
             hm = header_pattern.search(stripped)
             if hm:
                 flush_question()
                 q_type = hm.group(1).lower()
                 current = {
-                    "type":            "mcq" if "mcq" in q_type else "descriptive",
-                    "questionText":    "",
-                    "maxMarks":        int(hm.group(2)),
-                    "clo":             hm.group(3).strip(),
-                    "options":         [] if "mcq" in q_type else None,
+                    "type": "mcq" if "mcq" in q_type else "descriptive",
+                    "questionText": "",
+                    "maxMarks": int(hm.group(2)),
+                    "clo": hm.group(3).strip(),
+                    "options": [] if "mcq" in q_type else None,
                     "referenceAnswer": None,
-                    "keywords":        [],
-                    "correctAnswer":   None,
+                    "keywords": [],
+                    "correctAnswer": None,
                 }
                 question_text_lines = []
-                ref_answer_lines    = []
-                collecting_ref      = False
-                collecting_question = True   # next non-special lines are question text
+                ref_answer_lines = []
+                collecting_ref = False
+                collecting_question = True
                 continue
 
             if current is None:
                 continue
 
-            # ── Skip Subject: line — it's metadata not question text ───────
             if subject_pat.match(stripped):
                 continue
 
-            # ── MCQ options ───────────────────────────────────────────────
             om = option_pattern.match(stripped)
             if om and current.get("options") is not None:
-                current["options"].append({
-                    "label": om.group(1).upper(),
-                    "text":  om.group(2).strip(),
-                })
-                collecting_ref      = False
+                current["options"].append(
+                    {
+                        "label": om.group(1).upper(),
+                        "text": om.group(2).strip(),
+                    }
+                )
+                collecting_ref = False
                 collecting_question = False
                 continue
 
-            # ── Correct answer (MCQ) ──────────────────────────────────────
             cam = correct_ans_pat.match(stripped)
             if cam:
                 current["correctAnswer"] = cam.group(1).strip()
-                collecting_ref      = False
+                collecting_ref = False
                 collecting_question = False
                 continue
 
-            # ── Reference Answer marker ───────────────────────────────────
             if ref_ans_pat.match(stripped):
-                collecting_ref      = True
+                collecting_ref = True
                 collecting_question = False
-                # Grab inline text after "Reference Answer:" if any
                 inline = ref_ans_pat.sub("", stripped).strip()
                 ref_answer_lines = [inline] if inline else []
                 continue
 
-            # ── Keywords ──────────────────────────────────────────────────
             km = keyword_pat.match(stripped)
             if km:
                 current["keywords"] = [
-                    k.strip() for k in re.split(r"[,;]", km.group(1)) if k.strip()
+                    k.strip()
+                    for k in re.split(r"[,;]", km.group(1))
+                    if k.strip()
                 ]
-                collecting_ref      = False
+                collecting_ref = False
                 collecting_question = False
                 continue
 
-            # ── Accumulate reference answer lines ─────────────────────────
             if collecting_ref:
                 ref_answer_lines.append(stripped)
                 continue
 
-            # ── Accumulate question text lines ────────────────────────────
             if collecting_question:
                 question_text_lines.append(stripped)
 

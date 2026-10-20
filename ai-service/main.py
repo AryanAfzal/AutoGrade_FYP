@@ -5,6 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
+from services.text_cleaner import ensure_ollama_running, OCR_ENABLE_OLLAMA
+
+if OCR_ENABLE_OLLAMA:
+    ensure_ollama_running()
+
 # Routers
 from routers.extract    import router as extract_router
 from routers.parse_pdf  import router as parse_pdf_router

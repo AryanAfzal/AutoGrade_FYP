@@ -1,25 +1,46 @@
+import sys
 import time
+import types
 from pathlib import Path
 
-import cv2
-import numpy as np
-import torch
-from PIL import Image
+# Safeguard against Windows Application Control blocking compiled sklearn DLLs
+for _mod_name in [
+    "sklearn.svm._libsvm",
+    "sklearn.preprocessing._target_encoder_fast",
+]:
+    if _mod_name not in sys.modules:
+        _m = types.ModuleType(_mod_name)
+        if "target_encoder" in _mod_name:
+            _m._fit_encoding_fast = lambda *a, **k: None
+            _m._fit_encoding_fast_auto_smooth = lambda *a, **k: None
+        sys.modules[_mod_name] = _m
 
-# Transformers can optionally use scikit-learn for assisted decoding. Disable that
-# optional probe before importing Transformers; this avoids loading blocked sklearn
-# extension modules under Windows application-control policies.
 import transformers.utils.import_utils as _transformers_import_utils
 
 _transformers_import_utils.is_sklearn_available = lambda: False
 
-from transformers import RobertaTokenizer, ViTImageProcessor, VisionEncoderDecoderModel
+import cv2
+import numpy as np
+import torch
 from paddleocr import PaddleOCR
+from PIL import Image
+from transformers import (
+    RobertaTokenizer,
+    VisionEncoderDecoderModel,
+    ViTImageProcessor,
+)
 
+from services.text_cleaner import (
+    is_watermark_or_noise,
+    looks_like_header_token,
+    parse_header_line,
+)
 
+# Device configuration (CUDA GPU if available, else CPU)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 USE_GPU_PADDLE = torch.cuda.is_available()
 
+# Initialize PaddleOCR with sensitive detection parameters for handwriting
 try:
     ocr_engine = PaddleOCR(
         use_angle_cls=True,
@@ -27,12 +48,12 @@ try:
         use_gpu=USE_GPU_PADDLE,
         show_log=False,
         det_limit_side_len=3000,
-        det_db_thresh=0.10,
-        det_db_box_thresh=0.20,
-        det_db_unclip_ratio=2.0,
+        det_db_thresh=0.10,       # Sensitive threshold to capture light/thin handwriting
+        det_db_box_thresh=0.20,   # Keep faint handwritten boxes
+        det_db_unclip_ratio=2.0,  # Adequate margins for full character ascenders/descenders
     )
-except Exception as error:
-    print(f"PaddleOCR initialization fallback (retry without use_gpu): {error}")
+except Exception as e:
+    print(f"PaddleOCR init fallback (retry without use_gpu): {e}")
     ocr_engine = PaddleOCR(
         use_angle_cls=True,
         lang="en",
@@ -43,35 +64,54 @@ except Exception as error:
         det_db_unclip_ratio=2.0,
     )
 
-LOCAL_MODEL_DIR = (
+# Initialize TrOCR from local models folder
+BACKEND_TROCR_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "backend"
+    / "src"
+    / "Models"
+    / "trocr-base-handwritten"
+)
+FALLBACK_TROCR_DIR = (
     Path(__file__).resolve().parent.parent
     / "model_files"
     / "trocr-base-handwritten"
 )
-MODEL_SRC = (
-    str(LOCAL_MODEL_DIR)
-    if LOCAL_MODEL_DIR.exists()
-    else "microsoft/trocr-base-handwritten"
+LOCAL_MODEL_DIR = (
+    BACKEND_TROCR_DIR if BACKEND_TROCR_DIR.exists() else FALLBACK_TROCR_DIR
 )
+if not LOCAL_MODEL_DIR.exists():
+    raise FileNotFoundError(
+        f"Local TrOCR model not found at {BACKEND_TROCR_DIR} or {FALLBACK_TROCR_DIR}"
+    )
+MODEL_SRC = str(LOCAL_MODEL_DIR)
 
-print(f"Loading TrOCR handwriting model from {MODEL_SRC}...")
-image_processor = ViTImageProcessor.from_pretrained(MODEL_SRC)
-tokenizer = RobertaTokenizer.from_pretrained(MODEL_SRC)
-model = VisionEncoderDecoderModel.from_pretrained(MODEL_SRC)
+print(f"Loading official Base TrOCR from local folder '{MODEL_SRC}'...")
+image_processor = ViTImageProcessor.from_pretrained(
+    MODEL_SRC, local_files_only=True
+)
+tokenizer = RobertaTokenizer.from_pretrained(MODEL_SRC, local_files_only=True)
+model = VisionEncoderDecoderModel.from_pretrained(
+    MODEL_SRC, local_files_only=True
+)
 model.to(DEVICE)
 model.eval()
 print(f"TrOCR model loaded successfully on device: {DEVICE.upper()}")
 
 
 def extract_text_from_image(image_path: str) -> list[dict]:
-    """Detect page text with PaddleOCR and batch-refine short, uncertain regions."""
+    """
+    Extracts handwriting text lines using PaddleOCR detection & recognition,
+    refines short/difficult handwriting crops in parallel batches with TrOCR,
+    and sorts into natural reading order (ported directly from OCR_SYSTEM).
+    """
     page_started = time.perf_counter()
-    image = cv2.imread(image_path)
-    if image is None:
+    img = cv2.imread(image_path)
+    if img is None:
         return []
 
-    image_height, image_width = image.shape[:2]
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    img_h, img_w = img.shape[:2]
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     detection_started = time.perf_counter()
     result = ocr_engine.ocr(image_path, cls=True)
@@ -87,107 +127,134 @@ def extract_text_from_image(image_path: str) -> list[dict]:
         if line is None or len(line) < 2:
             continue
 
-        box, (paddle_text, paddle_confidence) = line[0], line[1]
-        x, y, width, height = cv2.boundingRect(np.array(box, dtype=np.int32))
-        aspect = width / float(height) if height > 0 else 0.0
+        box, (p_text, p_conf) = line[0], line[1]
+        pts = np.array(box, dtype=np.int32)
+        x, y, w, h = cv2.boundingRect(pts)
+        aspect = w / float(h) if h > 0 else 0.0
 
-        item_index = len(items)
+        idx = len(items)
         items.append(
             {
-                "box": (x, y, width, height),
-                "text": paddle_text,
-                "conf": float(paddle_confidence),
+                "box": (x, y, w, h),
+                "text": p_text,
+                "conf": float(p_conf),
             }
         )
 
+        # Queue very low-confidence handwriting crops where PaddleOCR failed for TrOCR batch refinement
+        # Note: TrOCR base hallucinates on normal crops, so only query it if PaddleOCR confidence is very low (< 0.35)
         if (
             aspect <= 4.5
-            and width >= 25
-            and height >= 14
-            and paddle_confidence < 0.88
+            and w >= 25
+            and h >= 14
+            and p_conf < 0.35
+            and not looks_like_header_token(p_text)
         ):
-            padding_y = max(4, int(height * 0.15))
-            padding_x = max(6, int(width * 0.10))
-            y1 = max(0, y - padding_y)
-            y2 = min(image_height, y + height + padding_y)
-            x1 = max(0, x - padding_x)
-            x2 = min(image_width, x + width + padding_x)
-            crop = image_rgb[y1:y2, x1:x2]
+            pad_y = max(4, int(h * 0.15))
+            pad_x = max(6, int(w * 0.10))
+            y1 = max(0, y - pad_y)
+            y2 = min(img_h, y + h + pad_y)
+            x1 = max(0, x - pad_x)
+            x2 = min(img_w, x + w + pad_x)
+            crop_np = img_rgb[y1:y2, x1:x2]
 
-            if crop.shape[0] > 6 and crop.shape[1] > 6:
-                crops_to_infer.append(Image.fromarray(crop))
-                crop_indices.append(item_index)
+            if crop_np.shape[0] > 6 and crop_np.shape[1] > 6:
+                crops_to_infer.append(Image.fromarray(crop_np))
+                crop_indices.append(idx)
 
+    # Run batch inference for all queued crops at once
     recognition_started = time.perf_counter()
     if crops_to_infer:
         batch_size = 16
-        for batch_start in range(0, len(crops_to_infer), batch_size):
-            batch_crops = crops_to_infer[batch_start : batch_start + batch_size]
-            batch_indices = crop_indices[batch_start : batch_start + batch_size]
+        for b_start in range(0, len(crops_to_infer), batch_size):
+            b_crops = crops_to_infer[b_start : b_start + batch_size]
+            b_indices = crop_indices[b_start : b_start + batch_size]
             try:
                 pixel_values = image_processor(
-                    images=batch_crops,
-                    return_tensors="pt",
+                    images=b_crops, return_tensors="pt"
                 ).pixel_values.to(DEVICE)
                 with torch.no_grad():
-                    output = model.generate(
-                        pixel_values,
-                        max_new_tokens=32,
-                        num_beams=1,
+                    out = model.generate(
+                        pixel_values, max_new_tokens=32, num_beams=1
                     )
-                decoded = tokenizer.batch_decode(output, skip_special_tokens=True)
-                for index, text in enumerate(decoded):
-                    recognised_text = text.strip()
+                decoded = tokenizer.batch_decode(out, skip_special_tokens=True)
+                for i, text_val in enumerate(decoded):
+                    t_text = text_val.strip()
+                    orig_text = items[b_indices[i]]["text"]
+                    if looks_like_header_token(orig_text):
+                        continue
                     if (
-                        recognised_text
-                        and len(recognised_text) > 1
-                        and not recognised_text.startswith("0 000")
+                        t_text
+                        and len(t_text) > 1
+                        and not t_text.startswith("0 000")
+                        and not t_text.startswith("p.")
                     ):
-                        items[batch_indices[index]]["text"] = recognised_text
-            except Exception as error:
-                print(f"TrOCR batch inference warning: {error}")
+                        items[b_indices[i]]["text"] = t_text
+            except Exception as e:
+                print(f"TrOCR batch inference warning: {e}")
     recognition_seconds = time.perf_counter() - recognition_started
 
     if not items:
         return []
 
-    items.sort(key=lambda item: item["box"][1])
+    # Sort items by Y to group into lines using geometric vertical overlap
+    items.sort(key=lambda it: it["box"][1])
     lines = []
-    current_line = [items[0]]
+    curr_line = [items[0]]
 
-    for item in items[1:]:
-        _, y, _, height = item["box"]
-        _, previous_y, _, previous_height = current_line[-1]["box"]
-        vertical_overlap = max(
-            0,
-            min(y + height, previous_y + previous_height)
-            - max(y, previous_y),
-        )
-        minimum_height = min(height, previous_height)
+    for it in items[1:]:
+        x, y, w, h = it["box"]
+        px, py, pw, ph = curr_line[-1]["box"]
 
-        if (
-            minimum_height > 0
-            and vertical_overlap / float(minimum_height) >= 0.45
-        ):
-            current_line.append(item)
+        # Calculate vertical overlap between bounding boxes
+        overlap_y = max(0, min(y + h, py + ph) - max(y, py))
+        min_h = min(h, ph)
+
+        # If vertical overlap is at least 45% of box height, they belong to the same text line
+        if min_h > 0 and (overlap_y / float(min_h)) >= 0.45:
+            curr_line.append(it)
         else:
-            lines.append(current_line)
-            current_line = [item]
+            lines.append(curr_line)
+            curr_line = [it]
 
-    if current_line:
-        lines.append(current_line)
+    if curr_line:
+        lines.append(curr_line)
 
     final_output = []
     for line in lines:
-        line.sort(key=lambda item: item["box"][0])
-        line_text = " ".join(item["text"] for item in line if item["text"]).strip()
-        average_confidence = sum(item["conf"] for item in line) / max(1, len(line))
-        if line_text:
+        line.sort(key=lambda it: it["box"][0])  # Sort left-to-right
+        line_text = " ".join(it["text"] for it in line if it["text"]).strip()
+        avg_conf = sum(it["conf"] for it in line) / max(1, len(line))
+        if not line_text:
+            continue
+
+        # Skip watermarks (CamScanner, etc.)
+        if is_watermark_or_noise(line_text) and not looks_like_header_token(
+            line_text
+        ):
+            continue
+
+        # Check if line contains a question header (standalone or inline)
+        is_h, num_val, rest_text = parse_header_line(line_text)
+        if is_h:
+            h_text = (
+                f"Q#{num_val:02d}:"
+                if num_val is not None and num_val > 0
+                else "Q#?:"
+            )
+            print(f"--> Extracted header: {h_text}")
             final_output.append(
-                {
-                    "text": line_text,
-                    "confidence": round(average_confidence, 2),
-                }
+                {"text": h_text, "confidence": round(avg_conf, 2)}
+            )
+            if rest_text and not is_watermark_or_noise(rest_text):
+                print(f"--> Extracted line: {rest_text}")
+                final_output.append(
+                    {"text": rest_text, "confidence": round(avg_conf, 2)}
+                )
+        else:
+            print(f"--> Extracted line: {line_text}")
+            final_output.append(
+                {"text": line_text, "confidence": round(avg_conf, 2)}
             )
 
     print(
@@ -203,6 +270,7 @@ def extract_text_from_image(image_path: str) -> list[dict]:
 
 def extract_text_from_images(image_paths: list[str]) -> list[dict]:
     all_results = []
-    for image_path in image_paths:
-        all_results.extend(extract_text_from_image(image_path))
+    for path in image_paths:
+        page_results = extract_text_from_image(path)
+        all_results.extend(page_results)
     return all_results

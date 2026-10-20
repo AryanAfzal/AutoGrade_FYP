@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AuthModule } from '../src/auth/auth.module';
-import { UsersModule } from '../src/users/users.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { ExamsModule } from './exams/exams.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { EvaluationModule } from './evaluation/evaluation.module';
@@ -10,19 +10,22 @@ import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ 
+    ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
     }),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DATABASE_HOST,
-      port: parseInt(process.env.DATABASE_PORT),
-      username: process.env.DATABASE_USER,
-      password: process.env.DATABASE_PASS,
-      database: process.env.DATABASE_NAME,
-      autoLoadEntities: true,
-      synchronize: true, // dev only — creates tables automatically
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        type: 'postgres',
+        host: config.get<string>('DATABASE_HOST') || process.env.DATABASE_HOST || 'localhost',
+        port: parseInt(config.get<string>('DATABASE_PORT') || process.env.DATABASE_PORT || '5432', 10),
+        username: config.get<string>('DATABASE_USER') || process.env.DATABASE_USER || 'postgres',
+        password: String(config.get<string>('DATABASE_PASS') ?? process.env.DATABASE_PASS ?? 'postgres'),
+        database: config.get<string>('DATABASE_NAME') || process.env.DATABASE_NAME || 'autograde',
+        autoLoadEntities: true,
+        synchronize: true, // dev only — creates tables automatically
+      }),
     }),
     AuthModule,
     UsersModule,
