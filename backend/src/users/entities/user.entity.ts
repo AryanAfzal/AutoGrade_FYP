@@ -58,6 +58,24 @@ export class User {
   @Column({ nullable: true })
   approvedByTeacherId: string | null;
 
+  @Column({ type: 'varchar', nullable: true, default: 'COMSATS University Islamabad, Wah Campus' })
+  university: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  profilePicture: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  isProfileComplete: boolean;
+
+  @Column({ type: 'varchar', default: 'local' })
+  authProvider: 'local' | 'google';
+
+  @Column({ type: 'varchar', nullable: true })
+  resetPasswordToken: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  resetPasswordExpiresAt: Date | null;
+
   @Column({ type: 'timestamp', nullable: true })
   requestedAt: Date | null;
 

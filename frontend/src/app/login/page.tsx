@@ -1,12 +1,13 @@
-﻿'use client';
+'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
-import { authApi } from '@/lib/api';
+import Link from 'next/link';
+import { authApi, saveAuthSession } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { GraduationCap, Shield, BookOpen, Eye, EyeOff } from 'lucide-react';
+import { GraduationCap, Shield, BookOpen, CheckCircle2 } from 'lucide-react';
 
 type Role = 'teacher' | 'admin' | 'student';
 
@@ -46,9 +47,22 @@ const roles: RoleOption[] = [
 export default function LoginPage() {
   const router = useRouter();
   const [selectedRole, setSelectedRole] = useState<Role>('teacher');
-  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('expired') === '1') {
+        setError('Your session has expired. Please sign in again.');
+      }
+      if (params.get('reset') === 'success') {
+        setNotice('Your password has been changed successfully. Please sign in with your new password.');
+      }
+    }
+  }, []);
 
   const {
     register,
@@ -56,30 +70,36 @@ export default function LoginPage() {
     formState: { errors },
   } = useForm<LoginForm>();
 
+  const redirectUser = (role: Role) => {
+    if (role === 'admin') {
+      router.push('/dashboard/admin');
+      return;
+    }
+    if (role === 'teacher') {
+      router.push('/dashboard/teacher');
+      return;
+    }
+    router.push('/dashboard/student');
+  };
+
   const onSubmit = async (data: LoginForm) => {
     setLoading(true);
     setError('');
+    setNotice('');
     try {
-      const response = await authApi.login(data.email, data.password, selectedRole);
-      localStorage.setItem('token', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
-
-      if (response.user.role === 'admin') {
-        router.push('/dashboard/admin');
-        return;
-      }
-
-      if (response.user.role === 'teacher') {
-        router.push('/dashboard/teacher');
-        return;
-      }
-
-      router.push('/dashboard/student');
+      const response = await authApi.login(
+        data.email,
+        data.password,
+        selectedRole,
+        rememberMe,
+      );
+      saveAuthSession(response.token, response.user, rememberMe);
+      redirectUser(response.user.role);
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Invalid credentials. Please try again.');
+        setError('Invalid login credentials. Please check your email and password.');
       }
     } finally {
       setLoading(false);
@@ -103,7 +123,7 @@ export default function LoginPage() {
             Evaluation
           </h1>
           <p className="text-[#9ECDD6] text-base leading-relaxed max-w-sm">
-            Automate grading, track learning outcomes, and deliver meaningful feedback.
+            Automate grading, track learning outcomes, and deliver meaningful feedback with secure role-based access control.
           </p>
 
           <div className="flex flex-col gap-3 pt-4">
@@ -111,7 +131,7 @@ export default function LoginPage() {
               'MCQ & Descriptive Answer Evaluation',
               'CLO Attainment Tracking',
               'Academic Integrity Detection',
-              'Instant Student Feedback',
+              'Role-Based Access (Admin, Teacher, Student)',
             ].map((feature) => (
               <div key={feature} className="flex items-center gap-3">
                 <div className="w-2 h-2 rounded-full bg-[#FAB963] shrink-0" />
@@ -127,8 +147,8 @@ export default function LoginPage() {
       </div>
 
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
-        <div className="w-full max-w-md space-y-8">
-          <div className="flex lg:hidden items-center gap-3 mb-6">
+        <div className="w-full max-w-md space-y-6">
+          <div className="flex lg:hidden items-center gap-3 mb-4">
             <div className="w-9 h-9 bg-[#005461] rounded-lg flex items-center justify-center">
               <BookOpen size={18} className="text-[#FAB963]" />
             </div>
@@ -145,7 +165,10 @@ export default function LoginPage() {
               <button
                 key={role}
                 type="button"
-                onClick={() => setSelectedRole(role)}
+                onClick={() => {
+                  setSelectedRole(role);
+                  setError('');
+                }}
                 className={`relative flex flex-col items-center gap-2 p-3 rounded-xl border-2 text-center transition-all duration-200 ${
                   selectedRole === role
                     ? 'border-[#005461] bg-[#005461] text-white shadow-md'
@@ -165,51 +188,85 @@ export default function LoginPage() {
             ))}
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {selectedRole === 'admin' && (
+            <div className="rounded-xl border border-[#E8DCC8] bg-white px-4 py-3 text-xs text-[#555555]">
+              <p className="font-semibold text-[#005461]">Predefined Administrator Accounts</p>
+              <p className="mt-0.5">
+                Authorized emails: <code className="font-mono">admin1@cuiwah.edu.pk</code>,{' '}
+                <code className="font-mono">admin2@cuiwah.edu.pk</code>,{' '}
+                <code className="font-mono">admin3@cuiwah.edu.pk</code>
+              </p>
+            </div>
+          )}
+
+          {notice && (
+            <div
+              role="status"
+              className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+            >
+              <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-600" />
+              <span>{notice}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
             <Input
               label="Email Address"
               type="email"
-              placeholder="you@cuiwah.edu.pk"
+              placeholder={
+                selectedRole === 'admin'
+                  ? 'admin1@cuiwah.edu.pk'
+                  : 'you@cuiwah.edu.pk'
+              }
               error={errors.email?.message}
               {...register('email', {
-                required: 'Email is required',
+                required: 'Email address is required.',
                 pattern: {
                   value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                  message: 'Enter a valid email address',
+                  message: 'Please enter a valid email address.',
                 },
               })}
             />
 
-            <div className="relative">
-              <Input
-                label="Password"
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Enter your password"
-                error={errors.password?.message}
-                {...register('password', {
-                  required: 'Password is required',
-                  minLength: {
-                    value: 6,
-                    message: 'Password must be at least 6 characters',
-                  },
-                })}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-8 text-[#888888] hover:text-[#005461] transition-colors"
+            <Input
+              label="Password"
+              type="password"
+              placeholder="Enter your password"
+              error={errors.password?.message}
+              {...register('password', {
+                required: 'Password is required.',
+              })}
+            />
+
+            <div className="flex items-center justify-between text-xs pt-0.5">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-[#4A4A4A]">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-4 w-4 rounded border-[#E8DCC8] text-[#005461] focus:ring-[#005461]"
+                />
+                <span>Remember me on this device</span>
+              </label>
+
+              <Link
+                href="/forgot-password"
+                className="font-semibold text-[#005461] hover:underline"
               >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
+                Forgot password?
+              </Link>
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+              <div
+                role="alert"
+                className="bg-red-50 border border-red-200 rounded-lg px-4 py-3"
+              >
                 <p className="text-sm text-red-600">{error}</p>
               </div>
             )}
 
-            <Button type="submit" size="lg" loading={loading} className="w-full mt-2">
+            <Button type="submit" size="lg" loading={loading} className="w-full">
               Sign in as {roles.find((r) => r.role === selectedRole)?.label}
             </Button>
           </form>
@@ -223,7 +280,7 @@ export default function LoginPage() {
                   onClick={() => router.push('/register/teacher')}
                   className="text-[#005461] font-semibold hover:underline"
                 >
-                  Apply here
+                  Create teacher account
                 </button>
               </>
             ) : selectedRole === 'student' ? (
@@ -234,11 +291,11 @@ export default function LoginPage() {
                   onClick={() => router.push('/register/student')}
                   className="text-[#005461] font-semibold hover:underline"
                 >
-                  Register here
+                  Create student account
                 </button>
               </>
             ) : (
-              <span>Administrator accounts are managed by the institution.</span>
+              <span>Predefined administrator accounts cannot be registered by ordinary users.</span>
             )}
           </div>
 

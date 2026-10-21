@@ -35,11 +35,22 @@ export class UsersService {
     });
   }
 
+  findByResetToken(hashedToken: string) {
+    return this.repo.findOne({
+      where: { resetPasswordToken: hashedToken },
+    });
+  }
+
   create(data: Partial<User>) {
     return this.repo.save(this.repo.create(data));
   }
 
-  update(id: string, data: Partial<User>) {
-    return this.repo.save(this.repo.create({ ...data, id }));
+  async update(id: string, data: Partial<User>): Promise<User> {
+    const existing = await this.findById(id);
+    if (!existing) {
+      return this.repo.save(this.repo.create({ ...data, id }));
+    }
+    Object.assign(existing, data);
+    return this.repo.save(existing);
   }
 }

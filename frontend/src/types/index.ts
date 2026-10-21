@@ -8,6 +8,11 @@ export interface User {
   email: string;
   role: UserRole;
   status?: UserAccountStatus;
+  university?: string | null;
+  profilePicture?: string | null;
+  isProfileComplete?: boolean;
+  authProvider?: 'local' | 'google';
+  phone?: string | null;
   rollNumber?: string | null;
   course?: string | null;
   teacherId?: string | null;
@@ -18,6 +23,8 @@ export interface User {
 
 export interface AuthResponse {
   token: string;
+  rememberMe?: boolean;
+  expiresIn?: string;
   user: User;
 }
 
@@ -25,6 +32,7 @@ export interface TeacherApplication {
   id: string;
   fullName: string;
   email: string;
+  university?: string | null;
   phone: string | null;
   department: string | null;
   qualification: string | null;
@@ -51,6 +59,7 @@ export interface StudentApplication {
   id: string;
   fullName: string;
   email: string;
+  university?: string | null;
   status: UserAccountStatus;
   rollNumber: string | null;
   requestedAt: string | null;

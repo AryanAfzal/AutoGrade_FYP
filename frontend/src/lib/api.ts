@@ -1,8 +1,60 @@
-﻿const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import type { User } from '@/types';
 
-function getToken(): string | null {
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('token');
+  return sessionStorage.getItem('token') || localStorage.getItem('token');
+}
+
+export function getStoredUser(): User | null {
+  if (typeof window === 'undefined') return null;
+  const raw = sessionStorage.getItem('user') || localStorage.getItem('user');
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as User;
+  } catch {
+    return null;
+  }
+}
+
+export function saveAuthSession(token: string, user: User, rememberMe = true) {
+  if (typeof window === 'undefined') return;
+  const serializedUser = JSON.stringify(user);
+  if (rememberMe) {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', serializedUser);
+    localStorage.setItem('rememberMe', 'true');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
+  } else {
+    sessionStorage.setItem('token', token);
+    sessionStorage.setItem('user', serializedUser);
+    // Keep user metadata mirrored so legacy components reading localStorage.getItem('user') work during the active session
+    localStorage.setItem('user', serializedUser);
+    localStorage.setItem('rememberMe', 'false');
+    localStorage.removeItem('token');
+  }
+  window.dispatchEvent(new CustomEvent('autograde:user-updated', { detail: user }));
+}
+
+export function updateStoredUser(user: User) {
+  if (typeof window === 'undefined') return;
+  const serializedUser = JSON.stringify(user);
+  if (sessionStorage.getItem('token')) {
+    sessionStorage.setItem('user', serializedUser);
+  }
+  localStorage.setItem('user', serializedUser);
+  window.dispatchEvent(new CustomEvent('autograde:user-updated', { detail: user }));
+}
+
+export function clearAuthSession() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('rememberMe');
+  sessionStorage.removeItem('token');
+  sessionStorage.removeItem('user');
 }
 
 function authHeaders(): HeadersInit {
@@ -13,10 +65,19 @@ function authHeaders(): HeadersInit {
   };
 }
 
-async function handleResponse<T>(res: Response): Promise<T> {
+async function handleResponse<T>(res: Response, isAuthEndpoint = false): Promise<T> {
   if (!res.ok) {
+    if (res.status === 401 && !isAuthEndpoint && typeof window !== 'undefined') {
+      clearAuthSession();
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login?expired=1';
+      }
+    }
     const error = await res.json().catch(() => ({ message: 'Something went wrong' }));
-    throw new Error(error.message || 'Request failed');
+    const message = Array.isArray(error.message)
+      ? error.message.join(' ')
+      : error.message || 'Request failed';
+    throw new Error(message);
   }
   return res.json();
 }
@@ -29,13 +90,23 @@ export const authApi = {
     return handleResponse<import('@/types').User>(res);
   },
 
-  login: async (email: string, password: string, role: 'teacher' | 'admin' | 'student' = 'teacher') => {
+  login: async (
+    email: string,
+    password: string,
+    role: 'teacher' | 'admin' | 'student' = 'teacher',
+    rememberMe = true,
+  ) => {
     const res = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, role }),
+      body: JSON.stringify({ email, password, role, rememberMe }),
     });
-    return handleResponse<{ token: string; user: import('@/types').User }>(res);
+    return handleResponse<{
+      token: string;
+      rememberMe?: boolean;
+      expiresIn?: string;
+      user: import('@/types').User;
+    }>(res, true);
   },
 
   googleAdminLogin: async (email: string, emailVerified: boolean) => {
@@ -44,12 +115,109 @@ export const authApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, emailVerified }),
     });
-    return handleResponse<{ token: string; user: import('@/types').User }>(res);
+    return handleResponse<{ token: string; user: import('@/types').User }>(res, true);
+  },
+
+  googleAuth: async (payload: {
+    idToken?: string;
+    email?: string;
+    fullName?: string;
+    profilePicture?: string;
+    role: 'teacher' | 'student' | 'admin';
+    university?: string;
+    registrationNumber?: string;
+    rememberMe?: boolean;
+  }) => {
+    const res = await fetch(`${BASE_URL}/auth/google-auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<{
+      token?: string;
+      pendingApproval?: boolean;
+      message?: string;
+      user: import('@/types').User;
+    }>(res, true);
+  },
+
+  forgotPassword: async (email: string) => {
+    const res = await fetch(`${BASE_URL}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    return handleResponse<{
+      message: string;
+      resetToken?: string;
+      resetLink?: string;
+      expiresInMinutes?: number;
+    }>(res, true);
+  },
+
+  resetPassword: async (payload: {
+    token: string;
+    newPassword: string;
+    confirmPassword: string;
+  }) => {
+    const res = await fetch(`${BASE_URL}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<{ message: string }>(res, true);
+  },
+
+  updateProfile: async (payload: {
+    fullName?: string;
+    email?: string;
+    university?: string;
+    phone?: string;
+    department?: string;
+    qualification?: string;
+    registrationNumber?: string;
+    profilePicture?: string;
+  }) => {
+    const res = await fetch(`${BASE_URL}/auth/profile`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<{ message: string; user: import('@/types').User }>(res);
+  },
+
+  uploadProfilePicture: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/auth/profile/picture`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+    return handleResponse<{ message: string; user: import('@/types').User }>(res);
+  },
+
+  changePassword: async (payload: {
+    currentPassword: string;
+    newPassword: string;
+    confirmPassword: string;
+  }) => {
+    const res = await fetch(`${BASE_URL}/auth/change-password`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<{ message: string }>(res, true);
   },
 
   registerStudent: async (payload: {
+    university: string;
     fullName: string;
     email: string;
+    registrationNumber: string;
     password: string;
   }) => {
     const res = await fetch(`${BASE_URL}/auth/register/student`, {
@@ -57,23 +225,24 @@ export const authApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    return handleResponse<{ message: string; user: import('@/types').User }>(res);
+    return handleResponse<{ message: string; user: import('@/types').User }>(res, true);
   },
 
   registerTeacher: async (payload: {
     fullName: string;
     email: string;
     password: string;
-    phone: string;
-    department: string;
-    qualification: string;
+    university?: string;
+    phone?: string;
+    department?: string;
+    qualification?: string;
   }) => {
     const res = await fetch(`${BASE_URL}/auth/register/teacher`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    return handleResponse<{ message: string; user: import('@/types').User }>(res);
+    return handleResponse<{ message: string; user: import('@/types').User }>(res, true);
   },
 
   getTeacherApplications: async () => {
@@ -177,8 +346,14 @@ export const authApi = {
   },
 
   logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    const token = getToken();
+    if (token) {
+      fetch(`${BASE_URL}/auth/logout`, {
+        method: 'POST',
+        headers: authHeaders(),
+      }).catch(() => {});
+    }
+    clearAuthSession();
   },
 };
 

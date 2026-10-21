@@ -1,27 +1,32 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 
 export class RegisterTeacherDto {
-  @IsString()
-  @MinLength(2)
+  @IsString({ message: 'Full name is required.' })
+  @MinLength(2, { message: 'Full name must be at least 2 characters long.' })
   fullName: string;
 
-  @IsEmail()
+  @IsEmail({}, { message: 'Please enter a valid email address.' })
   email: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(8, { message: 'Password must be at least 8 characters long.' })
+  @Matches(/[A-Z]/, { message: 'Password must contain at least one uppercase letter.' })
+  @Matches(/[^A-Za-z0-9]/, { message: 'Password must contain at least one special character.' })
   password: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(7)
-  phone: string;
+  university?: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(2)
-  department: string;
+  phone?: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(2)
-  qualification: string;
+  department?: string;
+
+  @IsOptional()
+  @IsString()
+  qualification?: string;
 }
-

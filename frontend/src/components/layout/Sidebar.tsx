@@ -12,9 +12,10 @@ import {
   BookOpen,
   ShieldCheck,
   GraduationCap,
+  UserCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { authApi } from '@/lib/api';
+import { authApi, getStoredUser } from '@/lib/api';
 import type { User, UserRole } from '@/types';
 
 const teacherNavItems = [
@@ -23,36 +24,39 @@ const teacherNavItems = [
   { label: 'Upload Sheets', href: '/dashboard/upload-sheets', icon: Upload },
   { label: 'AI Review', href: '/dashboard/ai-review', icon: ClipboardCheck },
   { label: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+  { label: 'Profile & Settings', href: '/dashboard/profile', icon: UserCircle2 },
 ];
 
 const adminNavItems = [
   { label: 'Dashboard', href: '/dashboard/admin', icon: LayoutDashboard },
-  { label: 'Review & assign subjects', href: '/dashboard/admin#teacher-applications', icon: ShieldCheck },
+  { label: 'Review & Assign Subjects', href: '/dashboard/admin#teacher-applications', icon: ShieldCheck },
+  { label: 'Profile & Settings', href: '/dashboard/profile', icon: UserCircle2 },
 ];
 
 const studentNavItems = [
   { label: 'Dashboard', href: '/dashboard/student', icon: LayoutDashboard },
-  { label: 'Results', href: '/dashboard/student', icon: GraduationCap },
+  { label: 'Results', href: '/dashboard/student#results', icon: GraduationCap },
+  { label: 'Profile & Settings', href: '/dashboard/profile', icon: UserCircle2 },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [role, setRole] = useState<UserRole | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const role: UserRole | null = user?.role || null;
 
   useEffect(() => {
-    const userRaw = localStorage.getItem('user');
-    if (!userRaw) {
-      setRole(null);
-      return;
-    }
-
-    try {
-      const user = JSON.parse(userRaw) as User;
-      setRole(user.role);
-    } catch {
-      setRole(null);
-    }
+    setUser(getStoredUser());
+    const onUserUpdate = (event: Event) => {
+      const custom = event as CustomEvent<User>;
+      if (custom.detail) {
+        setUser(custom.detail);
+      } else {
+        setUser(getStoredUser());
+      }
+    };
+    window.addEventListener('autograde:user-updated', onUserUpdate);
+    return () => window.removeEventListener('autograde:user-updated', onUserUpdate);
   }, []);
 
   const navItems = useMemo(() => {
@@ -87,7 +91,8 @@ export default function Sidebar() {
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map(({ label, href, icon: Icon }) => {
           const route = href.split('#')[0];
-          const active = pathname === route || (route !== '/dashboard' && pathname.startsWith(route));
+          const hasHash = href.includes('#');
+          const active = !hasHash && (pathname === route || (route !== '/dashboard' && pathname.startsWith(route)));
 
           return (
             <button
@@ -107,11 +112,33 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="px-3 py-4 border-t border-[#006878] space-y-1">
-        <div className="px-3 py-2">
-          <p className="text-xs text-[#9ECDD6] truncate">Signed in as</p>
-          <p className="text-sm text-white font-medium truncate">{roleLabel}</p>
-        </div>
+      <div className="px-3 py-4 border-t border-[#006878] space-y-2">
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard/profile')}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#006878] transition-colors text-left"
+        >
+          <div className="w-9 h-9 rounded-full bg-[#FAB963] text-[#1A1A1A] font-bold flex items-center justify-center overflow-hidden shrink-0">
+            {user?.profilePicture ? (
+              <img
+                src={user.profilePicture}
+                alt={user.fullName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span>{user?.fullName?.charAt(0)?.toUpperCase() || roleLabel.charAt(0)}</span>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-white font-semibold truncate">
+              {user?.fullName || roleLabel}
+            </p>
+            <p className="text-[11px] text-[#9ECDD6] truncate">
+              {user?.email || roleLabel}
+            </p>
+          </div>
+        </button>
+
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-[#C8E6EA] hover:bg-red-500 hover:text-white transition-all duration-200"
