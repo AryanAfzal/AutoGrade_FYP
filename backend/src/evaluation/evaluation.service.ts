@@ -112,6 +112,7 @@ export class EvaluationService {
       publishedAt: result.publishedAt,
       questions: result.entries.map((entry) => ({
         questionText: entry.questionText,
+        studentAnswer: entry.studentAnswer || 'No answer was extracted for this question.',
         mark: entry.approvedMark,
         maxMarks: entry.maxMarks,
         feedback: entry.feedback,

@@ -94,6 +94,7 @@ export interface PublishedStudentResult {
   publishedAt: string | null;
   questions: {
     questionText: string;
+    studentAnswer: string;
     mark: number | null;
     maxMarks: number;
     feedback: string | null;

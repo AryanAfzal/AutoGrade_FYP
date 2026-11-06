@@ -29,7 +29,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             type={resolvedType}
             className={cn(
               'w-full px-3 py-2 text-sm rounded-lg border bg-white text-[#1A1A1A]',
-              'border-[#E8DCC8] placeholder:text-[#888888]',
+              'border-[#CBD5E1] placeholder:text-[#94A3B8]',
               'focus:outline-none focus:ring-2 focus:ring-[#005461] focus:border-transparent',
               'transition-all duration-200',
               isPassword && 'pr-10',

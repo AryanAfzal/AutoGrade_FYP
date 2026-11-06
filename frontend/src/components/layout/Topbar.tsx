@@ -70,7 +70,7 @@ export default function Topbar() {
   };
 
   return (
-    <header className="fixed top-0 left-60 right-0 h-16 bg-white border-b border-[#E8DCC8] flex items-center justify-between px-8 z-40">
+    <header className="fixed top-0 left-60 right-0 h-16 bg-white border-b border-[#E8DCC8] shadow-[0_4px_18px_rgba(15,23,42,0.04)] flex items-center justify-between px-8 z-40">
       <div>
         <h1 className="text-base font-semibold text-[#1A1A1A]">
           {page.title}

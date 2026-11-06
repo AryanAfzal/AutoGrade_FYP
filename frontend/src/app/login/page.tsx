@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { authApi, saveAuthSession } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { GraduationCap, Shield, BookOpen, CheckCircle2 } from 'lucide-react';
+import { GraduationCap, Shield, BookOpen, CheckCircle2, ArrowLeft } from 'lucide-react';
 
 type Role = 'teacher' | 'admin' | 'student';
 
@@ -108,16 +108,30 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-[#FFF8EB] flex">
-      <div className="hidden lg:flex lg:w-1/2 bg-[#005461] flex-col justify-between p-12">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-[#FAB963] rounded-lg flex items-center justify-center">
-            <BookOpen size={20} className="text-[#1A1A1A]" />
+      <div className="relative hidden lg:flex lg:w-1/2 min-h-screen overflow-hidden bg-[#003D47] flex-col justify-between p-12">
+        <img
+          src="/assets/african-female-teacher-checking-answer-sheet-after-exam-top-view-workplace-school-and-college-education-concept-vector-illustration-in-flat-cartoon-2RPAB4R.jpg"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover object-center opacity-25"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#003D47]/75 via-[#005461]/40 to-[#003D47]/95" />
+
+        <div className="relative z-10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-[#FAB963] rounded-lg flex items-center justify-center">
+              <BookOpen size={20} className="text-[#1A1A1A]" />
+            </div>
+            <span className="text-white text-xl font-semibold">AutoGrade</span>
           </div>
-          <span className="text-white text-xl font-semibold">AutoGrade</span>
+          <Link href="/" className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-xs font-semibold text-white/90 transition hover:bg-white/10">
+            <ArrowLeft size={15} />
+            Back to website
+          </Link>
         </div>
 
-        <div className="space-y-6">
-          <h1 className="text-4xl font-bold text-white leading-tight">
+        <div className="relative z-10 max-w-lg space-y-5 pr-4">
+          <h1 className="text-[42px] font-bold text-white leading-[1.08] tracking-[-1.8px]">
             AI-Powered<br />
             Examination<br />
             Evaluation
@@ -125,23 +139,19 @@ export default function LoginPage() {
           <p className="text-[#9ECDD6] text-base leading-relaxed max-w-sm">
             Automate grading, track learning outcomes, and deliver meaningful feedback with secure role-based access control.
           </p>
-
-          <div className="flex flex-col gap-3 pt-4">
-            {[
-              'MCQ & Descriptive Answer Evaluation',
-              'CLO Attainment Tracking',
-              'Academic Integrity Detection',
-              'Role-Based Access (Admin, Teacher, Student)',
-            ].map((feature) => (
-              <div key={feature} className="flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-[#FAB963] shrink-0" />
-                <span className="text-[#C8E6EA] text-sm">{feature}</span>
-              </div>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {['AI Evaluation', 'CLO Analytics', 'Secure Roles'].map((feature) => (
+              <span
+                key={feature}
+                className="rounded-full border border-white/20 bg-[#003D47]/55 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm"
+              >
+                {feature}
+              </span>
             ))}
           </div>
         </div>
 
-        <p className="text-[#6BAAB5] text-xs">
+        <p className="relative z-10 text-[#C8E6EA] text-xs">
           COMSATS University Islamabad, Wah Campus — Session 2023–2026
         </p>
       </div>
@@ -153,6 +163,10 @@ export default function LoginPage() {
               <BookOpen size={18} className="text-[#FAB963]" />
             </div>
             <span className="text-[#005461] text-lg font-semibold">AutoGrade</span>
+            <Link href="/" className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#005461]">
+              <ArrowLeft size={14} />
+              Website
+            </Link>
           </div>
 
           <div className="space-y-1">

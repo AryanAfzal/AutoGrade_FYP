@@ -292,11 +292,37 @@ export default function StudentDashboardPage() {
                   </div>
                 </div>
                 {!!result.questions.length && (
-                  <div className="mt-4 space-y-2 border-t border-[#E8DCC8] pt-3">
+                  <div className="mt-4 space-y-3 border-t border-[#E8DCC8] pt-3">
                     {result.questions.map((question, index) => (
-                      <div key={`${result.examId}-question-${index}`} className="flex flex-wrap justify-between gap-2 text-sm">
-                        <span className="text-[#444444]">Q{index + 1}: {question.questionText}</span>
-                        <span className="font-medium text-[#005461]">{question.mark ?? '—'} / {question.maxMarks}</span>
+                      <div
+                        key={`${result.examId}-question-${index}`}
+                        className="rounded-xl border border-[#E8DCC8] bg-[#FFFDF8] p-4"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <p className="min-w-0 flex-1 text-sm font-semibold text-[#1A1A1A]">
+                            <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#005461] text-xs text-white">
+                              {index + 1}
+                            </span>
+                            {question.questionText}
+                          </p>
+                          <span className="rounded-lg border border-[#E8DCC8] bg-white px-3 py-1.5 text-sm font-bold text-[#005461]">
+                            {question.mark ?? '—'} / {question.maxMarks}
+                          </span>
+                        </div>
+                        <div className="mt-3 rounded-lg border border-[#E8DCC8] bg-white px-3 py-3">
+                          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#888888]">
+                            Your answer
+                          </p>
+                          <p className="whitespace-pre-wrap text-sm leading-6 text-[#444444]">
+                            {question.studentAnswer || 'No answer was extracted for this question.'}
+                          </p>
+                        </div>
+                        {question.feedback && (
+                          <p className="mt-2 text-xs leading-5 text-[#666666]">
+                            <span className="font-semibold text-[#005461]">Feedback:</span>{' '}
+                            {question.feedback}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
