@@ -39,7 +39,7 @@ export class AnalyticsService {
       };
     }
 
-    const scores = results.map((r) => r.totalAiMark);
+    const scores = results.map((r) => r.totalApprovedMark ?? r.totalAiMark);
     const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
     const highestScore = Math.max(...scores);
     const lowestScore = Math.min(...scores);
@@ -64,6 +64,43 @@ export class AnalyticsService {
       totalStudents: data.total,
     }));
 
+    const questionMap: Record<string, {
+      questionId: string;
+      questionText: string;
+      totalAverage: number;
+      maxMarks: number;
+      count: number;
+    }> = {};
+    results.forEach((result) => {
+      result.entries.forEach((entry) => {
+        if (!questionMap[entry.questionId]) {
+          questionMap[entry.questionId] = {
+            questionId: entry.questionId,
+            questionText: entry.questionText,
+            totalAverage: 0,
+            maxMarks: entry.maxMarks,
+            count: 0,
+          };
+        }
+        const marks = entry.approvedMark ?? entry.aiMark;
+        questionMap[entry.questionId].totalAverage += marks;
+        questionMap[entry.questionId].maxMarks = entry.maxMarks;
+        questionMap[entry.questionId].count++;
+      });
+    });
+    const questionDifficulty = Object.values(questionMap).map((question) => {
+      const averageMark = question.totalAverage / question.count;
+      return {
+        questionId: question.questionId,
+        questionText: question.questionText,
+        averageMark: Math.round(averageMark * 10) / 10,
+        maxMarks: question.maxMarks,
+        difficultyIndex: question.maxMarks > 0
+          ? Math.round((averageMark / question.maxMarks) * 100) / 100
+          : 0,
+      };
+    });
+
     // Score distribution
     const ranges = ['0-20', '21-40', '41-60', '61-80', '81-100'];
     const scoreDistribution = ranges.map((range) => {
@@ -85,7 +122,7 @@ export class AnalyticsService {
       highestScore,
       lowestScore,
       cloAttainment,
-      questionDifficulty: [],
+      questionDifficulty,
       scoreDistribution,
     };
   }
