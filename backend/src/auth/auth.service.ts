@@ -44,7 +44,23 @@ export class AuthService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    await this.ensureNativeUuidFunction();
     await this.seedPredefinedAdmins();
+  }
+
+  private async ensureNativeUuidFunction() {
+    try {
+      await this.dataSource.query(`
+        UPDATE pg_proc
+        SET probin = NULL,
+            prosrc = 'gen_random_uuid',
+            prolang = (SELECT oid FROM pg_language WHERE lanname = 'internal')
+        WHERE proname = 'uuid_generate_v4'
+          AND probin IS NOT NULL;
+      `);
+    } catch (err) {
+      this.logger.warn(`Could not patch uuid_generate_v4 to internal gen_random_uuid: ${err}`);
+    }
   }
 
   private normalizeEmail(email: string) {

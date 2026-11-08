@@ -1,23 +1,55 @@
+import importlib.machinery
 import sys
 import time
 import types
 from pathlib import Path
 
-# Safeguard against Windows Application Control blocking compiled sklearn DLLs
-for _mod_name in [
-    "sklearn.svm._libsvm",
-    "sklearn.preprocessing._target_encoder_fast",
-]:
-    if _mod_name not in sys.modules:
-        _m = types.ModuleType(_mod_name)
-        if "target_encoder" in _mod_name:
-            _m._fit_encoding_fast = lambda *a, **k: None
-            _m._fit_encoding_fast_auto_smooth = lambda *a, **k: None
-        sys.modules[_mod_name] = _m
+
+# Safeguard against Windows Smart App Control blocking compiled sklearn DLLs/.pyd files
+class _DummySklearnCallable:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __getattr__(self, name: str):
+        return _DummySklearnCallable()
+
+
+class _DummySklearnModule(types.ModuleType):
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _DummySklearnCallable()
+
+
+class _SklearnMetaFinder:
+    def find_spec(self, fullname: str, path=None, target=None):
+        if fullname == "sklearn" or fullname.startswith("sklearn."):
+            return importlib.machinery.ModuleSpec(
+                fullname,
+                loader=self,
+                is_package=True,
+            )
+        return None
+
+    def create_module(self, spec):
+        mod = _DummySklearnModule(spec.name)
+        mod.__path__ = []
+        return mod
+
+    def exec_module(self, module):
+        pass
+
+
+if not any(type(f).__name__ == "_SklearnMetaFinder" for f in sys.meta_path):
+    sys.meta_path.insert(0, _SklearnMetaFinder())
 
 import transformers.utils.import_utils as _transformers_import_utils
 
 _transformers_import_utils.is_sklearn_available = lambda: False
+_transformers_import_utils._sklearn_available = False
 
 import cv2
 import numpy as np

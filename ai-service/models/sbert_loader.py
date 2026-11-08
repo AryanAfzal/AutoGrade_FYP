@@ -1,4 +1,54 @@
 from pathlib import Path
+import importlib.machinery
+import sys
+import types
+
+
+# Prevent Windows Smart App Control from blocking unused scikit-learn .pyd binaries
+class _DummySklearnCallable:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __getattr__(self, name: str):
+        return _DummySklearnCallable()
+
+
+class _DummySklearnModule(types.ModuleType):
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _DummySklearnCallable()
+
+
+class _SklearnMetaFinder:
+    def find_spec(self, fullname: str, path=None, target=None):
+        if fullname == "sklearn" or fullname.startswith("sklearn."):
+            return importlib.machinery.ModuleSpec(
+                fullname,
+                loader=self,
+                is_package=True,
+            )
+        return None
+
+    def create_module(self, spec):
+        mod = _DummySklearnModule(spec.name)
+        mod.__path__ = []
+        return mod
+
+    def exec_module(self, module):
+        pass
+
+
+if not any(type(f).__name__ == "_SklearnMetaFinder" for f in sys.meta_path):
+    sys.meta_path.insert(0, _SklearnMetaFinder())
+
+import transformers.utils.import_utils as _transformers_import_utils
+_transformers_import_utils.is_sklearn_available = lambda: False
+_transformers_import_utils._sklearn_available = False
+
 from sentence_transformers import SentenceTransformer
 import numpy as np
 from numpy.linalg import norm
