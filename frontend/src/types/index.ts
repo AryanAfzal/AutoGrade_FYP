@@ -140,7 +140,16 @@ export interface PublishedStudentResult {
   totalMarks: number | null;
   maxMarks: number;
   publishedAt: string | null;
+  recheckDeadline: string | null;
   questions: {
+    answerEntryId: string;
+    recheckRequest: {
+      id: string;
+      status: 'pending' | 'upheld' | 'revised';
+      justification: string;
+      decisionComment: string | null;
+      resolvedAt: string | null;
+    } | null;
     questionText: string;
     studentAnswer: string;
     mark: number | null;
@@ -202,8 +211,34 @@ export interface Exam {
   totalMarks: number;
   status: 'draft' | 'active' | 'under_review' | 'published' | 'closed';
   publishedAt?: string | null;
+  recheckDeadline?: string | null;
   createdAt: string;
   questions: Question[];
+}
+
+export interface TeacherRecheckRequest {
+  id: string;
+  studentName: string;
+  studentEmail: string;
+  rollNumber: string | null;
+  examId: string;
+  examTitle: string;
+  subject: string;
+  questionText: string;
+  studentAnswer: string;
+  originalMark: number;
+  maxMarks: number;
+  feedback: string | null;
+  justification: string;
+  createdAt: string;
+}
+
+export interface UserNotification {
+  id: string;
+  title: string;
+  message: string;
+  readAt: string | null;
+  createdAt: string;
 }
 
 // ANSWER SHEETS

@@ -350,6 +350,13 @@ export default function TeacherDashboardPage() {
                       Manage
                     </Button>
                     <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => router.push(`/dashboard/ai-review?examId=${exam.id}`)}
+                    >
+                      Review
+                    </Button>
+                    <Button
                       variant="danger"
                       size="sm"
                       loading={deletingExamId === exam.id}

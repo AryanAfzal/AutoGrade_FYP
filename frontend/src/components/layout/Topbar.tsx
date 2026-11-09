@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Bell, Settings } from 'lucide-react';
-import { getStoredUser } from '@/lib/api';
-import type { User } from '@/types';
+import { authApi, getStoredUser } from '@/lib/api';
+import type { User, UserNotification } from '@/types';
 
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
   '/dashboard': {
@@ -51,12 +51,21 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     title: 'Analytics',
     subtitle: 'Class performance, CLO attainment, and difficulty index',
   },
+  '/dashboard/recheck-requests': {
+    title: 'Recheck Requests',
+    subtitle: 'Resolve student requests to review published marks',
+  },
+  '/dashboard/student/results': {
+    title: 'My Results',
+    subtitle: 'Published marks, feedback, and recheck requests',
+  },
 };
 
 export default function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useEffect(() => {
     setUser(getStoredUser());
@@ -71,6 +80,37 @@ export default function Topbar() {
     window.addEventListener('autograde:user-updated', onUserUpdate);
     return () => window.removeEventListener('autograde:user-updated', onUserUpdate);
   }, []);
+
+  useEffect(() => {
+    if (user?.role !== 'student') {
+      setUnreadNotifications(0);
+      return;
+    }
+
+    let active = true;
+    const refreshNotifications = () => {
+      authApi.getNotifications()
+        .then((notifications: UserNotification[]) => {
+          if (active) {
+            setUnreadNotifications(notifications.filter((notification) => !notification.readAt).length);
+          }
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            console.error('Unable to refresh student notifications:', error);
+          }
+        });
+    };
+
+    refreshNotifications();
+    const intervalId = window.setInterval(refreshNotifications, 30000);
+    window.addEventListener('autograde:notifications-updated', refreshNotifications);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener('autograde:notifications-updated', refreshNotifications);
+    };
+  }, [user?.role, pathname]);
 
   const page = pageTitles[pathname] || {
     title: 'AutoGrade',
@@ -100,11 +140,18 @@ export default function Topbar() {
 
         <button
           type="button"
-          title="Notifications"
+          onClick={() => {
+            if (user?.role === 'student') router.push('/dashboard/student/results');
+          }}
+          title={user?.role === 'student' ? `${unreadNotifications} unread notifications` : 'Notifications'}
           className="relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-[#FFF8EB] transition-colors"
         >
           <Bell size={18} className="text-[#005461]" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#FAB963] rounded-full" />
+          {unreadNotifications > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#FAB963] px-1 text-[9px] font-bold text-[#1A1A1A]">
+              {unreadNotifications > 9 ? '9+' : unreadNotifications}
+            </span>
+          )}
         </button>
 
         <button

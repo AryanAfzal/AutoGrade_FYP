@@ -11,7 +11,12 @@ import { AnswerSheet } from '../uploads/entities/answer-sheet.entity';
 import { Exam } from '../exams/entities/exam.entity';
 import { AnswerEntry } from './entities/answer-entry.entity';
 import { ReviewAudit } from './entities/review-audit.entity';
+import { RecheckRequest } from './entities/recheck-request.entity';
+import { RecheckAudit } from './entities/recheck-audit.entity';
+import { UserNotification } from './entities/user-notification.entity';
 import { ReviewAnswerEntryDto } from './dto/review-answer-entry.dto';
+import { CreateRecheckRequestDto } from './dto/create-recheck-request.dto';
+import { DecideRecheckRequestDto } from './dto/decide-recheck-request.dto';
 import { User } from '../users/entities/user.entity';
 import axios, { AxiosError, isAxiosError } from 'axios';
 import { existsSync } from 'node:fs';
@@ -36,6 +41,12 @@ export class EvaluationService {
 
     @InjectRepository(Exam)
     private examRepo: Repository<Exam>,
+
+    @InjectRepository(RecheckRequest)
+    private recheckRepo: Repository<RecheckRequest>,
+
+    @InjectRepository(UserNotification)
+    private notificationRepo: Repository<UserNotification>,
   ) {}
 
   async getResults(examId: string, user: User) {
@@ -95,11 +106,27 @@ export class EvaluationService {
       .innerJoinAndSelect('answerSheet.exam', 'exam')
       .leftJoinAndSelect('result.entries', 'entry')
       .where('result.status = :status', { status: 'approved' })
+      .andWhere('result.publishedAt IS NOT NULL')
       .andWhere('LOWER(TRIM(answerSheet.registrationNo)) = :rollNumber', {
         rollNumber: user.rollNumber.trim().toLowerCase(),
       })
       .orderBy('result.publishedAt', 'DESC', 'NULLS LAST')
       .getMany();
+
+    const entryIds = results.flatMap((result) => result.entries.map((entry) => entry.id));
+    const requests = entryIds.length
+      ? await this.recheckRepo.find({
+          where: { answerEntry: { id: In(entryIds) }, student: { id: user.id } },
+          relations: ['answerEntry'],
+          order: { createdAt: 'DESC' },
+        })
+      : [];
+    const latestRequestByEntry = new Map<string, RecheckRequest>();
+    for (const request of requests) {
+      if (!latestRequestByEntry.has(request.answerEntry.id)) {
+        latestRequestByEntry.set(request.answerEntry.id, request);
+      }
+    }
 
     return results.map((result) => ({
       examId: result.answerSheet.exam.id,
@@ -110,7 +137,18 @@ export class EvaluationService {
       totalMarks: result.totalApprovedMark,
       maxMarks: result.totalMaxMarks,
       publishedAt: result.publishedAt,
+      recheckDeadline: result.answerSheet.exam.recheckDeadline,
       questions: result.entries.map((entry) => ({
+        answerEntryId: entry.id,
+        recheckRequest: latestRequestByEntry.has(entry.id)
+          ? {
+              id: latestRequestByEntry.get(entry.id)!.id,
+              status: latestRequestByEntry.get(entry.id)!.status,
+              justification: latestRequestByEntry.get(entry.id)!.justification,
+              decisionComment: latestRequestByEntry.get(entry.id)!.decisionComment,
+              resolvedAt: latestRequestByEntry.get(entry.id)!.resolvedAt,
+            }
+          : null,
         questionText: entry.questionText,
         studentAnswer: entry.studentAnswer || 'No answer was extracted for this question.',
         mark: entry.approvedMark,
@@ -118,6 +156,254 @@ export class EvaluationService {
         feedback: entry.feedback,
       })),
     }));
+  }
+
+  async submitRecheckRequest(dto: CreateRecheckRequestDto, user: User) {
+    const justification = dto.justification.trim();
+    if (justification.length < 50) {
+      throw new BadRequestException('Justification must be at least 50 characters.');
+    }
+
+    return this.resultRepo.manager.transaction(async (manager) => {
+      const entryRepo = manager.getRepository(AnswerEntry);
+      const requestRepo = manager.getRepository(RecheckRequest);
+      const lockedEntry = await entryRepo.findOne({
+        where: { id: dto.answerEntryId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedEntry) {
+        throw new NotFoundException('Published answer entry not found.');
+      }
+      const entry = await entryRepo.findOne({
+        where: { id: lockedEntry.id },
+        relations: ['result', 'result.answerSheet', 'result.answerSheet.exam'],
+      });
+      if (!entry || entry.result.status !== 'approved' || !entry.result.publishedAt) {
+        throw new NotFoundException('Published answer entry not found.');
+      }
+      if (
+        user.role !== 'student' ||
+        user.status !== 'APPROVED' ||
+        !user.rollNumber ||
+        user.rollNumber.trim().toLowerCase() !==
+          entry.result.answerSheet.registrationNo.trim().toLowerCase()
+      ) {
+        throw new NotFoundException('Published answer entry not found.');
+      }
+      const deadline = entry.result.answerSheet.exam.recheckDeadline;
+      if (!deadline || new Date() > deadline) {
+        throw new BadRequestException('The recheck request deadline has passed or is not configured.');
+      }
+      const existingRequest = await requestRepo.findOne({
+        where: {
+          answerEntry: { id: entry.id },
+          student: { id: user.id },
+        },
+      });
+      if (existingRequest) {
+        throw new BadRequestException('You have already submitted a recheck request for this answer.');
+      }
+      if (entry.approvedMark === null || entry.approvedMark === undefined) {
+        throw new BadRequestException('This answer does not have a published mark to recheck.');
+      }
+
+      const request = await requestRepo.save(
+        requestRepo.create({
+          answerEntry: entry,
+          student: { id: user.id },
+          justification,
+          originalMark: entry.approvedMark,
+          status: 'pending',
+          decision: null,
+          revisedMark: null,
+          decisionComment: null,
+          reviewedBy: null,
+          resolvedAt: null,
+        }),
+      );
+      await manager.getRepository(RecheckAudit).save(
+        manager.getRepository(RecheckAudit).create({
+          request,
+          actor: { id: user.id },
+          action: 'submitted',
+          previousMark: entry.approvedMark,
+          finalMark: entry.approvedMark,
+          comment: justification,
+        }),
+      );
+
+      return {
+        id: request.id,
+        status: request.status,
+        justification: request.justification,
+        message: 'Your recheck request has been sent to your teacher.',
+      };
+    });
+  }
+
+  async getTeacherRecheckRequests(user: User) {
+    const requests = await this.recheckRepo.find({
+      where: {
+        status: 'pending',
+        answerEntry: {
+          result: {
+            answerSheet: { exam: { createdBy: { id: user.id } } },
+          },
+        },
+      },
+      relations: [
+        'student',
+        'answerEntry',
+        'answerEntry.result',
+        'answerEntry.result.answerSheet',
+        'answerEntry.result.answerSheet.exam',
+      ],
+      order: { createdAt: 'ASC' },
+    });
+    return requests.map((request) => ({
+      id: request.id,
+      studentName: request.student.fullName,
+      studentEmail: request.student.email,
+      rollNumber: request.student.rollNumber,
+      examId: request.answerEntry.result.answerSheet.exam.id,
+      examTitle: request.answerEntry.result.answerSheet.exam.title,
+      subject: request.answerEntry.result.answerSheet.exam.course,
+      questionText: request.answerEntry.questionText,
+      studentAnswer: request.answerEntry.studentAnswer,
+      originalMark: request.originalMark,
+      maxMarks: request.answerEntry.maxMarks,
+      feedback: request.answerEntry.feedback,
+      justification: request.justification,
+      createdAt: request.createdAt,
+    }));
+  }
+
+  async decideRecheckRequest(
+    requestId: string,
+    dto: DecideRecheckRequestDto,
+    user: User,
+  ) {
+    const comment = dto.comment.trim();
+    if (!comment) {
+      throw new BadRequestException('A comment is required for every recheck decision.');
+    }
+    if (dto.decision === 'revise' && (typeof dto.mark !== 'number' || !Number.isFinite(dto.mark))) {
+      throw new BadRequestException('Enter a valid revised mark.');
+    }
+
+    return this.resultRepo.manager.transaction(async (manager) => {
+      const requestRepo = manager.getRepository(RecheckRequest);
+      const lockedRequest = await requestRepo.findOne({
+        where: { id: requestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedRequest) {
+        throw new NotFoundException('Recheck request not found.');
+      }
+      const request = await requestRepo.findOne({
+        where: { id: lockedRequest.id },
+        relations: [
+          'student',
+          'answerEntry',
+          'answerEntry.result',
+          'answerEntry.result.entries',
+          'answerEntry.result.answerSheet',
+          'answerEntry.result.answerSheet.exam',
+          'answerEntry.result.answerSheet.exam.createdBy',
+        ],
+      });
+      if (
+        !request ||
+        request.answerEntry.result.answerSheet.exam.createdBy.id !== user.id
+      ) {
+        throw new NotFoundException('Recheck request not found.');
+      }
+      if (request.status !== 'pending') {
+        throw new BadRequestException('This recheck request has already been resolved.');
+      }
+
+      const entry = request.answerEntry;
+      const result = entry.result;
+      let finalMark = request.originalMark;
+      if (dto.decision === 'revise') {
+        if (dto.mark! > entry.maxMarks) {
+          throw new BadRequestException(`The revised mark cannot exceed ${entry.maxMarks}.`);
+        }
+        finalMark = Math.round(dto.mark! * 100) / 100;
+        entry.approvedMark = finalMark;
+        entry.reviewStatus = 'overridden';
+        await manager.getRepository(AnswerEntry).save(entry);
+        result.totalApprovedMark = result.entries.reduce(
+          (sum, resultEntry) =>
+            sum +
+            (resultEntry.id === entry.id
+              ? finalMark
+              : resultEntry.approvedMark ?? 0),
+          0,
+        );
+        await manager.getRepository(StudentResult).update(result.id, {
+          totalApprovedMark: result.totalApprovedMark,
+        });
+      }
+
+      request.status = dto.decision === 'uphold' ? 'upheld' : 'revised';
+      request.decision = dto.decision;
+      request.revisedMark = dto.decision === 'revise' ? finalMark : null;
+      request.decisionComment = comment;
+      request.reviewedBy = user;
+      request.resolvedAt = new Date();
+      await requestRepo.save(request);
+      await manager.getRepository(RecheckAudit).save(
+        manager.getRepository(RecheckAudit).create({
+          request,
+          actor: { id: user.id },
+          action: dto.decision === 'uphold' ? 'upheld' : 'revised',
+          previousMark: request.originalMark,
+          finalMark,
+          comment,
+        }),
+      );
+      await manager.getRepository(UserNotification).save(
+        manager.getRepository(UserNotification).create({
+          user: request.student,
+          recheckRequest: request,
+          title: 'Recheck request resolved',
+          message:
+            dto.decision === 'uphold'
+              ? `Your recheck request for "${entry.questionText}" was reviewed. The original mark of ${request.originalMark}/${entry.maxMarks} was upheld. Teacher comment: ${comment}`
+              : `Your recheck request for "${entry.questionText}" was reviewed. Your mark was revised to ${finalMark}/${entry.maxMarks}. Teacher comment: ${comment}`,
+          readAt: null,
+        }),
+      );
+
+      return {
+        id: request.id,
+        status: request.status,
+        finalMark,
+        totalApprovedMark: result.totalApprovedMark,
+        resolvedAt: request.resolvedAt,
+      };
+    });
+  }
+
+  async getStudentNotifications(user: User) {
+    return this.notificationRepo.find({
+      where: { user: { id: user.id } },
+      order: { createdAt: 'DESC' },
+      take: 30,
+    });
+  }
+
+  async markStudentNotificationRead(notificationId: string, user: User) {
+    const notification = await this.notificationRepo.findOne({
+      where: { id: notificationId, user: { id: user.id } },
+    });
+    if (!notification) {
+      throw new NotFoundException('Notification not found.');
+    }
+    notification.readAt = new Date();
+    await this.notificationRepo.save(notification);
+    return { message: 'Notification marked as read.' };
   }
 
   async triggerEvaluation(
@@ -496,6 +782,11 @@ export class EvaluationService {
       }
       if (exam.status === 'published' || exam.publishedAt) {
         throw new BadRequestException('Results for this exam are already published.');
+      }
+      if (!exam.recheckDeadline || exam.recheckDeadline <= new Date()) {
+        throw new BadRequestException(
+          'Set a future recheck deadline for this exam before publishing results.',
+        );
       }
       if (!exam.questions.length) {
         throw new BadRequestException('An exam without questions cannot be published.');

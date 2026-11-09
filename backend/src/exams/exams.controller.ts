@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Body, Param, Delete,
+  Controller, Get, Post, Body, Param, Delete, Patch,
   UseGuards, Request, UseInterceptors, UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -9,6 +9,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ExamsService } from './exams.service';
 import { CreateExamDto } from './dto/create-exam.dto';
+import { UpdateRecheckDeadlineDto } from '../evaluation/dto/update-recheck-deadline.dto';
 import axios from 'axios';
 import * as fs from 'fs';
 import FormData from 'form-data';
@@ -22,6 +23,15 @@ export class ExamsController {
   @Post()
   create(@Body() dto: CreateExamDto, @Request() req) {
     return this.examsService.create(dto, req.user);
+  }
+
+  @Patch(':id/recheck-deadline')
+  updateRecheckDeadline(
+    @Param('id') id: string,
+    @Body() dto: UpdateRecheckDeadlineDto,
+    @Request() req,
+  ) {
+    return this.examsService.updateRecheckDeadline(id, dto.recheckDeadline, req.user);
   }
 
   @Get()

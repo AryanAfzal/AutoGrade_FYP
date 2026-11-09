@@ -25,6 +25,9 @@ export class Exam {
   @Column({ type: 'timestamp', nullable: true })
   publishedAt: Date | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  recheckDeadline: Date | null;
+
   @ManyToOne(() => User)
   createdBy: User;
 

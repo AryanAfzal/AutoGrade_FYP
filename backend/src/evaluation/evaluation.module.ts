@@ -9,6 +9,10 @@ import { EvaluationService } from './evaluation.service';
 import { EvaluationController } from './evaluation.controller';
 import { StudentResultsController } from './student-results.controller';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { RecheckRequest } from './entities/recheck-request.entity';
+import { RecheckAudit } from './entities/recheck-audit.entity';
+import { UserNotification } from './entities/user-notification.entity';
+import { TeacherRecheckController } from './teacher-recheck.controller';
 
 @Module({
   imports: [
@@ -18,9 +22,12 @@ import { RolesGuard } from '../auth/guards/roles.guard';
       AnswerSheet,
       Exam,           
       ReviewAudit,
+      RecheckRequest,
+      RecheckAudit,
+      UserNotification,
     ]),
   ],
   providers: [EvaluationService, RolesGuard],
-  controllers: [EvaluationController, StudentResultsController],
+  controllers: [EvaluationController, StudentResultsController, TeacherRecheckController],
 })
 export class EvaluationModule {}

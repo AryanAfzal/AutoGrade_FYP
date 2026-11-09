@@ -14,6 +14,7 @@ import {
   GraduationCap,
   UserCircle2,
   Building2,
+  MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authApi, getStoredUser } from '@/lib/api';
@@ -24,6 +25,7 @@ const teacherNavItems = [
   { label: 'Create Exam', href: '/dashboard/create-exam', icon: FilePlus },
   { label: 'Upload Sheets', href: '/dashboard/upload-sheets', icon: Upload },
   { label: 'AI Review', href: '/dashboard/ai-review', icon: ClipboardCheck },
+  { label: 'Recheck Requests', href: '/dashboard/recheck-requests', icon: MessageSquare },
   { label: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
   { label: 'Profile & Settings', href: '/dashboard/profile', icon: UserCircle2 },
 ];
