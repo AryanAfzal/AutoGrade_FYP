@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import Image from 'next/image';
 import {
   LayoutDashboard,
   FilePlus,
@@ -80,9 +81,13 @@ export default function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-[#005461] flex flex-col z-50">
       <div className="flex items-center gap-3 px-6 py-5 border-b border-[#006878]">
-        <div className="w-8 h-8 bg-[#FAB963] rounded-lg flex items-center justify-center flex-shrink-0">
-          <BookOpen size={16} className="text-[#1A1A1A]" />
-        </div>
+        <Image
+          src="/favicon-round.png"
+          alt="AutoGrade Logo"
+          width={32}
+          height={32}
+          className="w-8 h-8 object-contain rounded-full shadow-sm flex-shrink-0"
+        />
         <span className="text-white font-semibold text-base">AutoGrade</span>
       </div>
 

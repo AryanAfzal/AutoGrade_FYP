@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { authApi, saveAuthSession } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -119,9 +120,14 @@ export default function LoginPage() {
 
         <div className="relative z-10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#FAB963] rounded-lg flex items-center justify-center">
-              <BookOpen size={20} className="text-[#1A1A1A]" />
-            </div>
+            <Image
+              src="/favicon-round.png"
+              alt="AutoGrade Logo"
+              width={42}
+              height={42}
+              className="w-[42px] h-[42px] object-contain rounded-full shadow-md"
+              priority
+            />
             <span className="text-white text-xl font-semibold">AutoGrade</span>
           </div>
           <Link href="/" className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-xs font-semibold text-white/90 transition hover:bg-white/10">
@@ -159,9 +165,13 @@ export default function LoginPage() {
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
         <div className="w-full max-w-md space-y-6">
           <div className="flex lg:hidden items-center gap-3 mb-4">
-            <div className="w-9 h-9 bg-[#005461] rounded-lg flex items-center justify-center">
-              <BookOpen size={18} className="text-[#FAB963]" />
-            </div>
+            <Image
+              src="/favicon-round.png"
+              alt="AutoGrade Logo"
+              width={36}
+              height={36}
+              className="w-9 h-9 object-contain rounded-full shadow-sm"
+            />
             <span className="text-[#005461] text-lg font-semibold">AutoGrade</span>
             <Link href="/" className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#005461]">
               <ArrowLeft size={14} />
