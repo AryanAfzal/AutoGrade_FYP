@@ -167,18 +167,68 @@ export class AnalyticsService {
     const escapeCsv = (value: string | number) =>
       `"${String(value).replace(/"/g, '""')}"`;
 
-    const rows = [
-      ['Student Name', 'Roll Number', 'Total Marks', 'Max Marks', 'Percentage'],
-      ...report.students.map((student) => [
+    const clos = report.cloAttainment;
+    const rows: (string | number)[][] = [
+      [
+        'Student Name',
+        'Roll Number',
+        'Total Marks',
+        'Max Marks',
+        'Percentage',
+        ...clos.flatMap((clo) => [
+          `${clo.clo} Earned Marks`,
+          `${clo.clo} Possible Marks`,
+          `${clo.clo} Attainment (%)`,
+        ]),
+      ],
+    ];
+
+    for (const student of report.students) {
+      const studentClos = new Map(
+        student.cloScores.map((clo) => [clo.clo, clo]),
+      );
+      rows.push([
         student.studentName,
         student.rollNumber,
         student.totalMarks,
         student.maxMarks,
         student.maxMarks
-          ? `${Math.round((student.totalMarks / student.maxMarks) * 100)}%`
+          ? `${Math.round((student.totalMarks / student.maxMarks) * 1000) / 10}%`
           : '0%',
+        ...clos.flatMap((clo): (string | number)[] => {
+          const score = studentClos.get(clo.clo);
+          return score
+            ? [score.earnedMarks, score.possibleMarks, score.attainmentPercent]
+            : ['', '', ''];
+        }),
+      ]);
+    }
+
+    rows.push([
+      'Class Average',
+      '',
+      report.totalStudents ? report.averageScore : 0,
+      report.totalStudents
+        ? Math.round(
+            (report.students.reduce((sum, student) => sum + student.maxMarks, 0) /
+              report.totalStudents) *
+              100,
+          ) / 100
+        : 0,
+      report.totalStudents && report.examTotalMarks
+        ? `${Math.round((report.averageScore / report.examTotalMarks) * 1000) / 10}%`
+        : '0%',
+      ...clos.flatMap((clo) => [
+        clo.totalStudents
+          ? Math.round((clo.earnedMarks / clo.totalStudents) * 100) / 100
+          : 0,
+        clo.totalStudents
+          ? Math.round((clo.possibleMarks / clo.totalStudents) * 100) / 100
+          : 0,
+        clo.attainmentPercent,
       ]),
-    ];
+    ]);
+
     return rows.map((row) => row.map(escapeCsv).join(',')).join('\n');
   }
 }

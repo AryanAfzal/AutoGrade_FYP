@@ -57,6 +57,16 @@ const statusConfig: Record<
   },
 };
 
+const canPreviewSheet = (sheet: AnswerSheet) =>
+  sheet.status === 'uploaded' || sheet.status === 'processing';
+
+function getNextPreviewSheetId(sheets: AnswerSheet[], currentId: string | null) {
+  if (currentId && sheets.some((sheet) => sheet.id === currentId && canPreviewSheet(sheet))) {
+    return currentId;
+  }
+  return sheets.find(canPreviewSheet)?.id ?? null;
+}
+
 function UploadSheetsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -67,6 +77,10 @@ function UploadSheetsContent() {
     searchParams.get('examId') || ''
   );
   const [sheets, setSheets] = useState<AnswerSheet[]>([]);
+  const [selectedSheetId, setSelectedSheetId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -97,12 +111,56 @@ function UploadSheetsContent() {
   useEffect(() => {
     if (!selectedExamId) return;
     setLoadingSheets(true);
+    setSheets([]);
+    setSelectedSheetId(null);
     uploadApi
       .getSheets(selectedExamId)
-      .then(setSheets)
+      .then((loadedSheets) => {
+        setSheets(loadedSheets);
+        setSelectedSheetId(getNextPreviewSheetId(loadedSheets, null));
+      })
       .catch(() => setSheets([]))
       .finally(() => setLoadingSheets(false));
   }, [selectedExamId]);
+
+  useEffect(() => {
+    if (!selectedExamId || !selectedSheetId) {
+      setPreviewUrl(null);
+      setPreviewError('');
+      setPreviewLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setPreviewUrl(null);
+    setPreviewError('');
+    setPreviewLoading(true);
+
+    uploadApi
+      .getSheetPdf(selectedExamId, selectedSheetId, controller.signal)
+      .then((file) => {
+        objectUrl = URL.createObjectURL(file);
+        setPreviewUrl(objectUrl);
+      })
+      .catch((previewLoadError: unknown) => {
+        if (!controller.signal.aborted) {
+          setPreviewError(
+            previewLoadError instanceof Error
+              ? previewLoadError.message
+              : 'Unable to load this PDF preview.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPreviewLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedExamId, selectedSheetId]);
 
   // Auto-refresh sheets every 2 seconds if evaluation is in progress
   useEffect(() => {
@@ -111,7 +169,12 @@ function UploadSheetsContent() {
     const interval = setInterval(() => {
       uploadApi
         .getSheets(selectedExamId)
-        .then(setSheets)
+        .then((loadedSheets) => {
+          setSheets(loadedSheets);
+          setSelectedSheetId((currentId) =>
+            getNextPreviewSheetId(loadedSheets, currentId),
+          );
+        })
         .catch(() => {});
     }, 2000);
 
@@ -139,6 +202,7 @@ function UploadSheetsContent() {
         fileArray
       );
       setSheets((prev) => [...uploaded, ...prev]);
+      if (uploaded[0]) setSelectedSheetId(uploaded[0].id);
       setSuccessCount(uploaded.length);
     } catch (err: unknown) {
       setError(
@@ -172,6 +236,9 @@ function UploadSheetsContent() {
       // Refresh sheets to show updated status
       const updated = await uploadApi.getSheets(selectedExamId);
       setSheets(updated);
+      setSelectedSheetId((currentId) =>
+        getNextPreviewSheetId(updated, currentId),
+      );
 
       setError(
         evaluation.started
@@ -197,7 +264,11 @@ function UploadSheetsContent() {
     setError('');
     try {
       await uploadApi.deleteSheet(selectedExamId, sheet.id);
-      setSheets((current) => current.filter((item) => item.id !== sheet.id));
+      const updatedSheets = sheets.filter((item) => item.id !== sheet.id);
+      setSheets(updatedSheets);
+      setSelectedSheetId((currentId) =>
+        getNextPreviewSheetId(updatedSheets, currentId),
+      );
     } catch (deleteError: unknown) {
       setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete this answer sheet.');
     } finally {
@@ -208,7 +279,8 @@ function UploadSheetsContent() {
   const selectedExam = exams.find((e: Exam) => e.id === selectedExamId);
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="grid max-w-7xl items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(250px,1fr)]">
+      <div className="min-w-0 space-y-6">
       {/* Exam selector */}
       <Card>
         <h3 className="text-sm font-semibold text-[#005461] mb-4 uppercase tracking-wide">
@@ -270,11 +342,12 @@ function UploadSheetsContent() {
 
       {/* Upload zone */}
       <Card>
-        <h3 className="text-sm font-semibold text-[#005461] mb-4 uppercase tracking-wide">
-          Upload Answer Sheets
-        </h3>
-
-        <div
+        <div className="grid gap-5 lg:grid-cols-2">
+          <section>
+            <h3 className="text-sm font-semibold text-[#005461] mb-4 uppercase tracking-wide">
+              Upload Answer Sheets
+            </h3>
+            <div
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -326,6 +399,52 @@ function UploadSheetsContent() {
             className="hidden"
             onChange={handleFileInput}
           />
+            </div>
+          </section>
+
+          <section className="min-w-0">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-[#005461] uppercase tracking-wide">
+                  Paper Preview
+                </h3>
+                {sheets.find((sheet) => sheet.id === selectedSheetId) && (
+                  <p className="mt-1 truncate text-xs text-[#777777]">
+                    {sheets.find((sheet) => sheet.id === selectedSheetId)?.registrationNo ||
+                      sheets.find((sheet) => sheet.id === selectedSheetId)?.studentName}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex min-h-[280px] items-center justify-center overflow-hidden rounded-xl border border-[#E8DCC8] bg-[#F7F5F0] lg:h-[360px]">
+              {previewLoading ? (
+                <div className="flex items-center gap-2 text-sm text-[#777777]">
+                  <Loader size={16} className="animate-spin text-[#005461]" />
+                  Loading paper...
+                </div>
+              ) : previewError ? (
+                <div className="flex max-w-sm flex-col items-center gap-2 px-5 text-center">
+                  <AlertCircle size={22} className="text-[#B45309]" />
+                  <p className="text-sm font-medium text-[#333333]">Preview unavailable</p>
+                  <p className="text-xs text-[#777777]">{previewError}</p>
+                </div>
+              ) : previewUrl ? (
+                <iframe
+                  title="Uploaded answer sheet PDF preview"
+                  src={previewUrl}
+                  className="h-full min-h-[360px] w-full bg-white"
+                />
+              ) : (
+                <div className="flex max-w-sm flex-col items-center gap-2 px-5 text-center">
+                  <FileText size={24} className="text-[#A9A293]" />
+                  <p className="text-sm font-medium text-[#333333]">No paper selected</p>
+                  <p className="text-xs text-[#777777]">
+                    Upload a PDF or select an uploaded sheet below to preview it here.
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
         </div>
 
         {/* Success message */}
@@ -416,21 +535,39 @@ function UploadSheetsContent() {
                 return (
                   <Card key={sheet.id} padding="sm">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div className="w-9 h-9 bg-[#FFF8EB] rounded-lg flex items-center justify-center shrink-0">
                           <FileText
                             size={16}
                             className="text-[#005461]"
                           />
                         </div>
-                        <div>
-                          <p className="text-sm font-medium text-[#1A1A1A]">
-                            {sheet.studentName || 'Unknown Student'}
-                          </p>
-                          <p className="text-xs text-[#888888]">
-                            {sheet.registrationNo || 'No Reg. No. detected'}{' '}
-                            · {formatDate(sheet.uploadedAt)}
-                          </p>
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            aria-pressed={selectedSheetId === sheet.id}
+                            disabled={!canPreviewSheet(sheet)}
+                            onClick={() => setSelectedSheetId(sheet.id)}
+                            className={`min-w-0 rounded px-1 py-1 text-left ${
+                              !canPreviewSheet(sheet)
+                                ? 'cursor-default'
+                                : selectedSheetId === sheet.id
+                                  ? 'bg-[#EAF5F6]'
+                                  : 'hover:bg-[#FFF8EB]'
+                            }`}
+                          >
+                            <span className="block truncate text-sm font-medium text-[#1A1A1A]">
+                              {sheet.studentName || 'Unknown Student'}
+                            </span>
+                            <span className="block truncate text-xs text-[#888888]">
+                              {sheet.registrationNo || 'No Reg. No. detected'} · {formatDate(sheet.uploadedAt)}
+                            </span>
+                          </button>
+                          {!canPreviewSheet(sheet) && (
+                            <span className="ml-1 text-[10px] text-[#888888]">
+                              Evaluated — preview hidden
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -474,6 +611,54 @@ function UploadSheetsContent() {
           )}
         </div>
       )}
+      </div>
+
+      <aside className="xl:sticky xl:top-6">
+        <Card className="border-[#F0D8B5] bg-[#FFFCF6]">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[#005461]">
+            How to evaluate papers
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-[#777777]">
+            Follow these steps to upload answer sheets and start AI evaluation.
+          </p>
+          <ol className="mt-5 space-y-4">
+            {[
+              {
+                title: 'Select an exam',
+                detail: 'Choose the exam these answer sheets belong to.',
+              },
+              {
+                title: 'Upload the paper',
+                detail: 'Click the upload area or drag in one or more student answer PDFs.',
+              },
+              {
+                title: 'Start AI evaluation',
+                detail: 'In Uploaded Sheets below, click Start Evaluation to begin marking.',
+              },
+              {
+                title: 'Wait for processing',
+                detail: 'Keep this page open while sheets show Processing. When complete, continue to AI Review.',
+              },
+            ].map((step, index) => (
+              <li key={step.title} className="flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#005461] text-xs font-bold text-white">
+                  {index + 1}
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-[#1A1A1A]">{step.title}</p>
+                  <p className="mt-0.5 text-xs leading-5 text-[#777777]">{step.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-5 rounded-lg border border-[#E8DCC8] bg-white px-3 py-2.5">
+            <p className="text-xs font-medium text-[#005461]">Next step</p>
+            <p className="mt-1 text-xs leading-5 text-[#777777]">
+              After evaluation, open AI Review to check marks and publish results.
+            </p>
+          </div>
+        </Card>
+      </aside>
     </div>
   );
 }

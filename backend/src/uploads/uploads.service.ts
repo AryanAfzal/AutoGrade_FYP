@@ -5,6 +5,7 @@ import { AnswerSheet } from './entities/answer-sheet.entity';
 import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { createReadStream } from 'node:fs';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { StudentResult } from '../evaluation/entities/student-result.entity';
@@ -87,6 +88,49 @@ export class UploadsService {
       where: { exam: { id: examId } },
       order: { uploadedAt: 'DESC' },
     });
+  }
+
+  async getSheetPdf(examId: string, sheetId: string, user: User) {
+    const sheet = await this.sheetRepo.findOne({
+      where: {
+        id: sheetId,
+        exam: { id: examId, createdBy: { id: user.id } },
+      },
+    });
+    if (!sheet) {
+      throw new NotFoundException('Answer sheet not found for this exam.');
+    }
+
+    const uploadsDirectory = await fs.realpath(path.resolve(process.cwd(), 'uploads'));
+    const resolvedPath = path.resolve(sheet.filePath);
+    const relativePath = path.relative(uploadsDirectory, resolvedPath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      throw new NotFoundException('The PDF file is not available.');
+    }
+
+    let realFilePath: string;
+    try {
+      realFilePath = await fs.realpath(resolvedPath);
+      const realRelativePath = path.relative(uploadsDirectory, realFilePath);
+      if (realRelativePath.startsWith('..') || path.isAbsolute(realRelativePath)) {
+        throw new NotFoundException('The PDF file is not available.');
+      }
+      const fileInfo = await fs.stat(realFilePath);
+      if (!fileInfo.isFile()) {
+        throw new NotFoundException('The PDF file is not available.');
+      }
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new NotFoundException('The PDF file is no longer available.');
+      }
+      throw error;
+    }
+
+    return {
+      stream: createReadStream(realFilePath),
+      fileName: path.basename(realFilePath),
+    };
   }
 
   async deleteSheet(examId: string, sheetId: string, user: User) {

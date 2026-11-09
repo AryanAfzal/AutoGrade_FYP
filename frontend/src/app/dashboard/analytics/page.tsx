@@ -8,10 +8,10 @@ import {
   Download,
   AlertCircle,
   Loader,
-  TrendingUp,
   Users,
   Award,
   ChevronDown,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   BarChart,
@@ -41,6 +41,7 @@ function AnalyticsContent() {
   );
   const [report, setReport] = useState<AnalyticsReport | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [showMinAverageMax, setShowMinAverageMax] = useState(false);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
@@ -80,7 +81,8 @@ function AnalyticsContent() {
       .getReport(selectedExamId)
       .then((analyticsReport) => {
         setReport(analyticsReport);
-        setSelectedStudentId(analyticsReport.students[0]?.resultId ?? null);
+        setSelectedStudentId(null);
+        setShowMinAverageMax(false);
       })
       .catch((loadError: unknown) =>
         setError(loadError instanceof Error ? loadError.message : 'Failed to load analytics data.'),
@@ -114,6 +116,24 @@ function AnalyticsContent() {
       })) ?? [],
     [selectedStudent],
   );
+  const minAverageMaxStudents = useMemo(() => {
+    if (!report?.students.length) return null;
+    const students = report.students;
+    const average = report.averageScore;
+    return {
+      lowest: students.reduce((lowest, student) =>
+        student.totalMarks < lowest.totalMarks ? student : lowest,
+      ),
+      average: students.reduce((closest, student) =>
+        Math.abs(student.totalMarks - average) < Math.abs(closest.totalMarks - average)
+          ? student
+          : closest,
+      ),
+      highest: students.reduce((highest, student) =>
+        student.totalMarks > highest.totalMarks ? student : highest,
+      ),
+    };
+  }, [report]);
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -222,109 +242,47 @@ function AnalyticsContent() {
       {/* Analytics Data */}
       {selectedExamId && !loading && report && report.totalStudents > 0 && (
         <>
-          {/* Score Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <div className="text-center">
-                <div className="w-12 h-12 bg-[#FFF8EB] rounded-lg flex items-center justify-center mx-auto mb-3">
-                  <Users size={20} className="text-[#005461]" />
-                </div>
-                <p className="text-xs text-[#888888] uppercase tracking-wide">Total Students</p>
-                <p className="text-2xl font-bold text-[#1A1A1A] mt-1">
-                  {report.totalStudents}
+          <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <Card className="lg:sticky lg:top-4">
+              <div className="mb-3">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[#1A1A1A]">
+                  <Users size={16} className="text-[#005461]" />
+                  Student papers
+                </h3>
+                <p className="mt-1 text-xs text-[#777777]">
+                  Roll number and obtained / total marks
                 </p>
+              </div>
+              <div className="max-h-[70vh] space-y-1 overflow-y-auto">
+                {report.students.map((student) => (
+                  <button
+                    key={student.resultId}
+                    type="button"
+                    aria-pressed={selectedStudentId === student.resultId}
+                    onClick={() =>
+                      setSelectedStudentId((current) =>
+                        current === student.resultId ? null : student.resultId,
+                      )
+                    }
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-3 text-left transition-colors ${
+                      selectedStudentId === student.resultId
+                        ? 'bg-[#EAF5F6] ring-1 ring-[#B8D9DD]'
+                        : 'hover:bg-[#FFF8EB]'
+                    }`}
+                  >
+                    <span className="min-w-0 truncate text-sm font-semibold text-[#005461]">
+                      {student.rollNumber || '—'}
+                    </span>
+                    <span className="shrink-0 text-sm font-semibold text-[#1A1A1A]">
+                      {student.totalMarks} / {student.maxMarks}
+                    </span>
+                  </button>
+                ))}
               </div>
             </Card>
 
-            <Card>
-              <div className="text-center">
-                <div className="w-12 h-12 bg-[#FFF8EB] rounded-lg flex items-center justify-center mx-auto mb-3">
-                  <TrendingUp size={20} className="text-[#005461]" />
-                </div>
-                <p className="text-xs text-[#888888] uppercase tracking-wide">Average Score</p>
-                <p className="text-2xl font-bold text-[#005461] mt-1">
-                  {report.averageScore.toFixed(1)} <span className="text-sm font-medium text-[#888888]">/ {report.examTotalMarks}</span>
-                </p>
-              </div>
-            </Card>
-
-            <Card>
-              <div className="text-center">
-                <div className="w-12 h-12 bg-[#FFF8EB] rounded-lg flex items-center justify-center mx-auto mb-3">
-                  <Award size={20} className="text-[#005461]" />
-                </div>
-                <p className="text-xs text-[#888888] uppercase tracking-wide">Highest Score</p>
-                <p className="text-2xl font-bold text-green-600 mt-1">
-                  {report.highestScore.toFixed(1)} <span className="text-sm font-medium text-[#888888]">/ {report.examTotalMarks}</span>
-                </p>
-              </div>
-            </Card>
-
-            <Card>
-              <div className="text-center">
-                <div className="w-12 h-12 bg-[#FFF8EB] rounded-lg flex items-center justify-center mx-auto mb-3">
-                  <TrendingUp size={20} className="text-[#005461] rotate-180" />
-                </div>
-                <p className="text-xs text-[#888888] uppercase tracking-wide">Lowest Score</p>
-                <p className="text-2xl font-bold text-red-600 mt-1">
-                  {report.lowestScore.toFixed(1)} <span className="text-sm font-medium text-[#888888]">/ {report.examTotalMarks}</span>
-                </p>
-              </div>
-            </Card>
-          </div>
-
-          <Card>
-            <div className="mb-4">
-              <h3 className="text-sm font-semibold text-[#1A1A1A] flex items-center gap-2">
-                <Users size={16} className="text-[#005461]" />
-                Student papers and total marks
-              </h3>
-              <p className="mt-1 text-xs text-[#777777]">
-                Select a student row to see their question-by-question attainment and CLO totals.
-              </p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-[#E8DCC8] text-xs uppercase tracking-wide text-[#777777]">
-                    <th className="px-3 py-3 font-semibold">Roll number</th>
-                    <th className="px-3 py-3 font-semibold">Student</th>
-                    <th className="px-3 py-3 text-right font-semibold">Total marks</th>
-                    <th className="px-3 py-3 text-right font-semibold">Percentage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.students.map((student) => (
-                    <tr key={student.resultId} className="border-b border-[#F1EADF] last:border-0">
-                      <td colSpan={4} className="p-0">
-                        <button
-                          type="button"
-                          aria-pressed={selectedStudentId === student.resultId}
-                          onClick={() => setSelectedStudentId(student.resultId)}
-                          className={`grid w-full grid-cols-4 items-center text-left transition-colors ${
-                            selectedStudentId === student.resultId
-                              ? 'bg-[#EAF5F6]'
-                              : 'hover:bg-[#FFF8EB]'
-                          }`}
-                        >
-                          <span className="px-3 py-3 font-semibold text-[#005461]">{student.rollNumber || '—'}</span>
-                          <span className="px-3 py-3 text-[#333333]">{student.studentName}</span>
-                          <span className="px-3 py-3 text-right font-semibold text-[#1A1A1A]">
-                            {student.totalMarks} / {student.maxMarks}
-                          </span>
-                          <span className="px-3 py-3 text-right text-[#666666]">
-                            {student.maxMarks ? `${((student.totalMarks / student.maxMarks) * 100).toFixed(1)}%` : '—'}
-                          </span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {selectedStudent && (
+            <div className="min-w-0 space-y-5">
+          {selectedStudent ? (
             <Card>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -335,9 +293,19 @@ function AnalyticsContent() {
                     Roll number: <strong>{selectedStudent.rollNumber || 'Not recorded'}</strong>
                   </p>
                 </div>
-                <p className="text-lg font-bold text-[#005461]">
-                  {selectedStudent.totalMarks} / {selectedStudent.maxMarks}
-                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-lg font-bold text-[#005461]">
+                    {selectedStudent.totalMarks} / {selectedStudent.maxMarks}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setSelectedStudentId(null)}
+                  >
+                    <ArrowLeft size={14} className="mr-2" />
+                    Back to class analytics
+                  </Button>
+                </div>
               </div>
 
               {studentChartData.length > 0 ? (
@@ -399,34 +367,6 @@ function AnalyticsContent() {
               )}
 
               <div className="mt-5">
-                <h4 className="text-sm font-semibold text-[#1A1A1A]">Question marks</h4>
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-[#E8DCC8] text-xs uppercase tracking-wide text-[#777777]">
-                        <th className="px-3 py-2 font-semibold">Question</th>
-                        <th className="px-3 py-2 font-semibold">CLO</th>
-                        <th className="px-3 py-2 text-right font-semibold">Marks</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedStudent.questions.map((question) => (
-                        <tr key={question.questionId} className="border-b border-[#F1EADF] last:border-0">
-                          <td className="px-3 py-2.5 text-[#1A1A1A]">
-                            Q{question.questionNumber}: {question.questionText}
-                          </td>
-                          <td className="px-3 py-2.5 text-[#666666]">{question.clo}</td>
-                          <td className="px-3 py-2.5 text-right font-semibold text-[#005461]">
-                            {question.mark} / {question.maxMarks}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="mt-5">
                 <h4 className="text-sm font-semibold text-[#1A1A1A]">Marks by CLO</h4>
                 <div className="mt-2 overflow-x-auto">
                   <table className="w-full min-w-[420px] text-left text-sm">
@@ -452,7 +392,75 @@ function AnalyticsContent() {
                 </div>
               </div>
             </Card>
-          )}
+          ) : (
+            <>
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-[#1A1A1A]">Class summary</h3>
+                <p className="mt-1 text-xs text-[#777777]">
+                  {report.totalStudents} student papers · Pass rate {report.passRate}%
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setShowMinAverageMax((visible) => !visible)}
+              >
+                {showMinAverageMax ? 'Hide min / average / max papers' : 'Show min / average / max papers'}
+              </Button>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {[
+                { label: 'Lowest', mark: report.lowestScore, color: 'text-red-600' },
+                { label: 'Average', mark: report.averageScore, color: 'text-[#005461]' },
+                { label: 'Highest', mark: report.highestScore, color: 'text-green-600' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-lg bg-[#FAF8F3] p-4">
+                  <p className="text-xs uppercase tracking-wide text-[#777777]">{item.label} total</p>
+                  <p className={`mt-1 text-xl font-bold ${item.color}`}>
+                    {item.mark.toFixed(1)} <span className="text-sm font-medium text-[#888888]">/ {report.examTotalMarks}</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+            {showMinAverageMax && minAverageMaxStudents && (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[420px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-[#E8DCC8] text-xs uppercase tracking-wide text-[#777777]">
+                      <th className="px-3 py-2 font-semibold">Paper</th>
+                      <th className="px-3 py-2 font-semibold">Roll number</th>
+                      <th className="px-3 py-2 text-right font-semibold">Marks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {([
+                      ['Minimum', minAverageMaxStudents.lowest],
+                      ['Closest to average', minAverageMaxStudents.average],
+                      ['Maximum', minAverageMaxStudents.highest],
+                    ] as const).map(([label, student]) => (
+                      <tr key={label} className="border-b border-[#F1EADF] last:border-0">
+                        <td className="px-3 py-2.5 font-medium text-[#333333]">{label}</td>
+                        <td className="px-3 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedStudentId(student.resultId)}
+                            className="font-semibold text-[#005461] underline-offset-2 hover:underline"
+                          >
+                            {student.rollNumber || '—'}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-[#1A1A1A]">
+                          {student.totalMarks} / {student.maxMarks}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
 
           {/* Score Distribution */}
           {report.scoreDistribution && report.scoreDistribution.length > 0 && (
@@ -587,6 +595,10 @@ function AnalyticsContent() {
               </div>
             </div>
           </Card>
+            </>
+          )}
+            </div>
+          </div>
         </>
       )}
     </div>
