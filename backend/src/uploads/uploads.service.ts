@@ -1,10 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { AnswerSheet } from './entities/answer-sheet.entity';
 import axios from 'axios';
 import * as path from 'path';
+import * as fs from 'fs/promises';
+import { createReadStream } from 'node:fs';
 import { UsersService } from '../users/users.service';
+import { User } from '../users/entities/user.entity';
+import { StudentResult } from '../evaluation/entities/student-result.entity';
+import { AnswerEntry } from '../evaluation/entities/answer-entry.entity';
+import { ReviewAudit } from '../evaluation/entities/review-audit.entity';
+import { RecheckRequest } from '../evaluation/entities/recheck-request.entity';
+import { RecheckAudit } from '../evaluation/entities/recheck-audit.entity';
 
 function extractRollNumberFromFilename(fileName: string): string | null {
   const fullMatch = fileName.match(
@@ -28,6 +36,7 @@ export class UploadsService {
     @InjectRepository(AnswerSheet)
     private sheetRepo: Repository<AnswerSheet>,
     private usersService: UsersService,
+    private dataSource: DataSource,
   ) {}
 
   async uploadSheets(examId: string, files: Express.Multer.File[]) {
@@ -79,5 +88,135 @@ export class UploadsService {
       where: { exam: { id: examId } },
       order: { uploadedAt: 'DESC' },
     });
+  }
+
+  async getSheetPdf(examId: string, sheetId: string, user: User) {
+    const sheet = await this.sheetRepo.findOne({
+      where: {
+        id: sheetId,
+        exam: { id: examId, createdBy: { id: user.id } },
+      },
+    });
+    if (!sheet) {
+      throw new NotFoundException('Answer sheet not found for this exam.');
+    }
+
+    const uploadsDirectory = await fs.realpath(path.resolve(process.cwd(), 'uploads'));
+    const resolvedPath = path.resolve(sheet.filePath);
+    const relativePath = path.relative(uploadsDirectory, resolvedPath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      throw new NotFoundException('The PDF file is not available.');
+    }
+
+    let realFilePath: string;
+    try {
+      realFilePath = await fs.realpath(resolvedPath);
+      const realRelativePath = path.relative(uploadsDirectory, realFilePath);
+      if (realRelativePath.startsWith('..') || path.isAbsolute(realRelativePath)) {
+        throw new NotFoundException('The PDF file is not available.');
+      }
+      const fileInfo = await fs.stat(realFilePath);
+      if (!fileInfo.isFile()) {
+        throw new NotFoundException('The PDF file is not available.');
+      }
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new NotFoundException('The PDF file is no longer available.');
+      }
+      throw error;
+    }
+
+    return {
+      stream: createReadStream(realFilePath),
+      fileName: path.basename(realFilePath),
+    };
+  }
+
+  async deleteSheet(examId: string, sheetId: string, user: User) {
+    const sheet = await this.sheetRepo.findOne({
+      where: {
+        id: sheetId,
+        exam: { id: examId, createdBy: { id: user.id } },
+      },
+      relations: ['exam'],
+    });
+    if (!sheet) {
+      throw new NotFoundException('Answer sheet not found for this exam.');
+    }
+    if (sheet.status === 'processing') {
+      throw new BadRequestException('Wait for processing to finish before deleting this answer sheet.');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const resultRepo = manager.getRepository(StudentResult);
+      const entryRepo = manager.getRepository(AnswerEntry);
+      const reviewAuditRepo = manager.getRepository(ReviewAudit);
+      const recheckRequestRepo = manager.getRepository(RecheckRequest);
+      const recheckAuditRepo = manager.getRepository(RecheckAudit);
+
+      const results = await resultRepo.find({
+        where: { answerSheet: { id: sheet.id } },
+        select: { id: true },
+      });
+      const resultIds = results.map((result) => result.id);
+      if (resultIds.length) {
+        const entries = await entryRepo.find({
+          where: { result: { id: In(resultIds) } },
+          select: { id: true },
+        });
+        const entryIds = entries.map((entry) => entry.id);
+        if (entryIds.length) {
+          const recheckRequests = await recheckRequestRepo.find({
+            where: { answerEntry: { id: In(entryIds) } },
+            select: { id: true },
+          });
+          const recheckRequestIds = recheckRequests.map((request) => request.id);
+          if (recheckRequestIds.length) {
+            const recheckAudits = await recheckAuditRepo.find({
+              where: { request: { id: In(recheckRequestIds) } },
+              select: { id: true },
+            });
+            if (recheckAudits.length) {
+              await recheckAuditRepo.delete(recheckAudits.map((audit) => audit.id));
+            }
+            await recheckRequestRepo.delete(recheckRequestIds);
+          }
+          const reviewAudits = await reviewAuditRepo.find({
+            where: { answerEntry: { id: In(entryIds) } },
+            select: { id: true },
+          });
+          if (reviewAudits.length) {
+            await reviewAuditRepo.delete(reviewAudits.map((audit) => audit.id));
+          }
+          await entryRepo.delete(entryIds);
+        }
+        await resultRepo.delete(resultIds);
+      }
+
+      await manager.getRepository(AnswerSheet).delete({ id: sheet.id });
+    });
+
+    const uploadsDirectory = path.resolve(process.cwd(), 'uploads');
+    const resolvedPath = path.resolve(sheet.filePath);
+    const relativePath = path.relative(uploadsDirectory, resolvedPath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      this.logger.warn(`Skipped deleting answer file outside uploads directory: ${resolvedPath}`);
+    } else {
+      try {
+        await fs.unlink(resolvedPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          this.logger.error(
+            `Answer sheet ${sheet.id} was deleted, but its file cleanup failed: ${resolvedPath}`,
+            error instanceof Error ? error.stack : String(error),
+          );
+        }
+      }
+    }
+
+    return {
+      message: `Answer sheet for ${sheet.registrationNo || sheet.studentName} and its evaluation data were deleted.`,
+    };
   }
 }

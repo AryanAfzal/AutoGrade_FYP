@@ -41,6 +41,7 @@ export default function TeacherDashboardPage() {
   const [requestNotice, setRequestNotice] = useState('');
   const [examError, setExamError] = useState('');
   const [deletingExamId, setDeletingExamId] = useState<string | null>(null);
+  const [viewingExamId, setViewingExamId] = useState<string | null>(null);
 
   useEffect(() => {
     const raw = localStorage.getItem('user');
@@ -288,9 +289,12 @@ export default function TeacherDashboardPage() {
         )}
       </div>
 
-      <div className="space-y-4">
+      <div id="papers-made" className="scroll-mt-24 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-[#1A1A1A]">Recent Exams</h3>
+          <div>
+            <h3 className="text-base font-semibold text-[#1A1A1A]">Papers made</h3>
+            <p className="mt-1 text-xs text-[#777777]">Your created exams, newest first.</p>
+          </div>
           <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/create-exam')}>
             + New Exam
           </Button>
@@ -350,6 +354,15 @@ export default function TeacherDashboardPage() {
                       Manage
                     </Button>
                     <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        setViewingExamId((current) => current === exam.id ? null : exam.id)
+                      }
+                    >
+                      {viewingExamId === exam.id ? 'Hide paper' : 'View paper'}
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => router.push(`/dashboard/ai-review?examId=${exam.id}`)}
@@ -368,6 +381,114 @@ export default function TeacherDashboardPage() {
                     </Button>
                   </div>
                 </div>
+                {viewingExamId === exam.id && (
+                  <div className="mt-4 space-y-3 border-t border-[#E8DCC8] pt-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-[#005461]">
+                        Questions and answer key
+                      </h4>
+                      <span className="text-xs text-[#777777]">
+                        {exam.questions?.length ?? 0} question(s) · {exam.totalMarks} total marks
+                      </span>
+                    </div>
+                    {!exam.questions?.length ? (
+                      <p className="rounded-lg bg-[#FFF8EB] px-4 py-3 text-sm text-[#777777]">
+                        This paper does not contain any saved questions.
+                      </p>
+                    ) : (
+                      exam.questions.map((question, index) => {
+                        const correctOption = question.options?.find(
+                          (option) => option.label === question.correctAnswer,
+                        );
+                        return (
+                          <div
+                            key={question.id}
+                            className="rounded-xl border border-[#E8DCC8] bg-[#FFFDF8] p-4"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <p className="min-w-0 flex-1 text-sm font-semibold leading-6 text-[#1A1A1A]">
+                                <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#005461] text-xs text-white">
+                                  {index + 1}
+                                </span>
+                                {question.questionText}
+                              </p>
+                              <span className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-[#005461]">
+                                {question.maxMarks} marks · {question.clo}
+                              </span>
+                            </div>
+                            {question.type === 'mcq' && (
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                {(question.options || []).map((option) => (
+                                  <div
+                                    key={option.label}
+                                    className={`rounded-lg border px-3 py-2 text-sm ${
+                                      option.label === question.correctAnswer
+                                        ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                                        : 'border-[#E8DCC8] bg-white text-[#444444]'
+                                    }`}
+                                  >
+                                    <span className="mr-2 font-semibold">{option.label}.</span>
+                                    {option.text}
+                                    {option.label === question.correctAnswer && (
+                                      <span className="ml-2 text-xs font-semibold">(Correct)</span>
+                                    )}
+                                  </div>
+                                ))}
+                                <p className="text-xs text-[#666666] sm:col-span-2">
+                                  Answer key: <strong>{question.correctAnswer || 'Not set'}</strong>
+                                  {correctOption ? ` — ${correctOption.text}` : ''}
+                                </p>
+                              </div>
+                            )}
+                            {question.type === 'descriptive' && (
+                              <div className="mt-3 space-y-3">
+                                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                                    Reference answer
+                                  </p>
+                                  <p className="whitespace-pre-wrap text-sm leading-6 text-[#333333]">
+                                    {question.referenceAnswer || 'No reference answer provided.'}
+                                  </p>
+                                </div>
+                                {!!question.keywords?.length && (
+                                  <p className="text-xs text-[#555555]">
+                                    <strong>Keywords:</strong> {question.keywords.join(', ')}
+                                  </p>
+                                )}
+                                {!!question.rubric?.concepts.length && (
+                                  <div>
+                                    <p className="mb-2 text-xs font-semibold text-[#005461]">Marking rubric</p>
+                                    <div className="space-y-2">
+                                      {question.rubric.concepts.map((concept, conceptIndex) => (
+                                        <div
+                                          key={`${question.id}-rubric-${conceptIndex}`}
+                                          className="rounded-lg border border-[#E8DCC8] bg-white px-3 py-2"
+                                        >
+                                          <div className="flex flex-wrap justify-between gap-2 text-sm">
+                                            <strong className="text-[#1A1A1A]">{concept.name}</strong>
+                                            <span className="font-semibold text-[#005461]">{concept.maxMarks} marks</span>
+                                          </div>
+                                          {concept.description && (
+                                            <p className="mt-1 text-xs leading-5 text-[#555555]">{concept.description}</p>
+                                          )}
+                                          {!!concept.keywords.length && (
+                                            <p className="mt-1 text-xs text-[#777777]">
+                                              Keywords: {concept.keywords.join(', ')}
+                                            </p>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </Card>
             ))}
           </div>

@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { User } from '../users/entities/user.entity';
 import { StudentResult } from '../evaluation/entities/student-result.entity';
-import { AnswerSheet } from '../uploads/entities/answer-sheet.entity';
 import { Exam } from '../exams/entities/exam.entity';
 
 @Injectable()
@@ -10,139 +10,225 @@ export class AnalyticsService {
   constructor(
     @InjectRepository(StudentResult)
     private resultRepo: Repository<StudentResult>,
-    @InjectRepository(AnswerSheet)
-    private sheetRepo: Repository<AnswerSheet>,
     @InjectRepository(Exam)
     private examRepo: Repository<Exam>,
   ) {}
 
-  async getReport(examId: string) {
-    const exam = await this.examRepo.findOne({ where: { id: examId } });
-    const sheets = await this.sheetRepo.find({ where: { exam: { id: examId } } });
+  async getReport(examId: string, user: User) {
+    const exam = await this.examRepo.findOne({
+      where: { id: examId, createdBy: { id: user.id } },
+      relations: ['questions'],
+    });
+    if (!exam) {
+      throw new NotFoundException('Exam not found.');
+    }
 
     const results = await this.resultRepo.find({
       where: { answerSheet: { exam: { id: examId } } },
       relations: ['entries', 'answerSheet'],
+      order: { answerSheet: { registrationNo: 'ASC' } },
     });
+    const questionOrder = new Map(
+      exam.questions.map((question, index) => [question.id, index + 1]),
+    );
+    const cloTotals = new Map<string, {
+      earnedMarks: number;
+      possibleMarks: number;
+      studentsMet: number;
+      totalStudents: number;
+    }>();
 
-    if (!results.length) {
-      return {
-        examId,
-        examTitle: exam?.title || '',
-        totalStudents: 0,
-        averageScore: 0,
-        highestScore: 0,
-        lowestScore: 0,
-        cloAttainment: [],
-        questionDifficulty: [],
-        scoreDistribution: [],
-      };
-    }
+    const students = results
+      .filter((result) => result.entries.length > 0)
+      .map((result) => {
+        const cloTotalsForStudent = new Map<string, { earnedMarks: number; possibleMarks: number }>();
+        const questions = result.entries
+          .map((entry) => {
+            const question = exam.questions.find((item) => item.id === entry.questionId);
+            if (!question) return null;
+            const mark = entry.approvedMark ?? entry.aiMark;
+            const clo = question.clo || 'Unassigned CLO';
+            const studentClo = cloTotalsForStudent.get(clo) || {
+              earnedMarks: 0,
+              possibleMarks: 0,
+            };
+            studentClo.earnedMarks += mark;
+            studentClo.possibleMarks += entry.maxMarks;
+            cloTotalsForStudent.set(clo, studentClo);
 
-    const scores = results.map((r) => r.totalApprovedMark ?? r.totalAiMark);
-    const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const highestScore = Math.max(...scores);
-    const lowestScore = Math.min(...scores);
+            const classClo = cloTotals.get(clo) || {
+              earnedMarks: 0,
+              possibleMarks: 0,
+              studentsMet: 0,
+              totalStudents: 0,
+            };
+            classClo.earnedMarks += mark;
+            classClo.possibleMarks += entry.maxMarks;
+            cloTotals.set(clo, classClo);
 
-    // CLO Attainment
-    const cloMap: Record<string, { total: number; met: number }> = {};
-    results.forEach((r) => {
-      r.entries.forEach((e) => {
-        const question = exam.questions?.find((q) => q.id === e.questionId);
-        if (!question) return;
-        const clo = question.clo;
-        if (!cloMap[clo]) cloMap[clo] = { total: 0, met: 0 };
-        cloMap[clo].total++;
-        if (e.aiMark / e.maxMarks >= 0.5) cloMap[clo].met++;
-      });
-    });
+            return {
+              questionId: entry.questionId,
+              questionNumber: questionOrder.get(entry.questionId) || 0,
+              questionText: entry.questionText,
+              clo,
+              mark,
+              maxMarks: entry.maxMarks,
+            };
+          })
+          .filter((question): question is NonNullable<typeof question> => question !== null)
+          .sort((first, second) => first.questionNumber - second.questionNumber);
 
-    const cloAttainment = Object.entries(cloMap).map(([clo, data]) => ({
-      clo,
-      attainmentPercent: Math.round((data.met / data.total) * 100),
-      studentsMet: data.met,
-      totalStudents: data.total,
-    }));
-
-    const questionMap: Record<string, {
-      questionId: string;
-      questionText: string;
-      totalAverage: number;
-      maxMarks: number;
-      count: number;
-    }> = {};
-    results.forEach((result) => {
-      result.entries.forEach((entry) => {
-        if (!questionMap[entry.questionId]) {
-          questionMap[entry.questionId] = {
-            questionId: entry.questionId,
-            questionText: entry.questionText,
-            totalAverage: 0,
-            maxMarks: entry.maxMarks,
-            count: 0,
-          };
+        for (const [clo, data] of cloTotalsForStudent) {
+          const classClo = cloTotals.get(clo)!;
+          classClo.totalStudents += 1;
+          if (data.earnedMarks / data.possibleMarks >= 0.5) {
+            classClo.studentsMet += 1;
+          }
         }
-        const marks = entry.approvedMark ?? entry.aiMark;
-        questionMap[entry.questionId].totalAverage += marks;
-        questionMap[entry.questionId].maxMarks = entry.maxMarks;
-        questionMap[entry.questionId].count++;
-      });
-    });
-    const questionDifficulty = Object.values(questionMap).map((question) => {
-      const averageMark = question.totalAverage / question.count;
-      return {
-        questionId: question.questionId,
-        questionText: question.questionText,
-        averageMark: Math.round(averageMark * 10) / 10,
-        maxMarks: question.maxMarks,
-        difficultyIndex: question.maxMarks > 0
-          ? Math.round((averageMark / question.maxMarks) * 100) / 100
-          : 0,
-      };
-    });
 
-    // Score distribution
-    const ranges = ['0-20', '21-40', '41-60', '61-80', '81-100'];
-    const scoreDistribution = ranges.map((range) => {
-      const [min, max] = range.split('-').map(Number);
-      return {
-        range,
-        count: scores.filter((s) => {
-          const pct = (s / results[0].totalMaxMarks) * 100;
-          return pct >= min && pct <= max;
-        }).length,
-      };
-    });
+        const maxMarks = questions.reduce((sum, question) => sum + question.maxMarks, 0);
+        const totalMarks = questions.reduce((sum, question) => sum + question.mark, 0);
+        return {
+          resultId: result.id,
+          studentName: result.answerSheet.studentName,
+          rollNumber: result.answerSheet.registrationNo,
+          totalMarks: Math.round(totalMarks * 100) / 100,
+          maxMarks,
+          questions,
+          cloScores: Array.from(cloTotalsForStudent.entries())
+            .map(([clo, data]) => ({
+              clo,
+              earnedMarks: Math.round(data.earnedMarks * 100) / 100,
+              possibleMarks: data.possibleMarks,
+              attainmentPercent: data.possibleMarks
+                ? Math.round((data.earnedMarks / data.possibleMarks) * 1000) / 10
+                : 0,
+            }))
+            .sort((first, second) => first.clo.localeCompare(second.clo)),
+        };
+      });
+
+    const scores = students.map((student) => student.totalMarks);
+    const totalStudents = students.length;
+    const averageScore = totalStudents
+      ? scores.reduce((sum, score) => sum + score, 0) / totalStudents
+      : 0;
+    const highestScore = totalStudents ? Math.max(...scores) : 0;
+    const lowestScore = totalStudents ? Math.min(...scores) : 0;
+    const cloAttainment = Array.from(cloTotals.entries())
+      .map(([clo, data]) => ({
+        clo,
+        attainmentPercent: data.possibleMarks
+          ? Math.round((data.earnedMarks / data.possibleMarks) * 100)
+          : 0,
+        earnedMarks: Math.round(data.earnedMarks * 100) / 100,
+        possibleMarks: data.possibleMarks,
+        studentsMet: data.studentsMet,
+        totalStudents: data.totalStudents,
+      }))
+      .sort((first, second) => first.clo.localeCompare(second.clo));
+
+    const scoreDistribution = [
+      { range: '0-20', min: 0, max: 20 },
+      { range: '21-40', min: 20, max: 40 },
+      { range: '41-60', min: 40, max: 60 },
+      { range: '61-80', min: 60, max: 80 },
+      { range: '81-100', min: 80, max: 100 },
+    ].map(({ range, min, max }, index) => ({
+      range,
+      count: students.filter((student) => {
+        if (!student.maxMarks) return false;
+        const percentage = (student.totalMarks / student.maxMarks) * 100;
+        return (index === 0 ? percentage >= min : percentage > min) && percentage <= max;
+      }).length,
+    }));
 
     return {
       examId,
-      examTitle: exam?.title || '',
-      totalStudents: results.length,
+      examTitle: exam.title,
+      examTotalMarks: exam.totalMarks,
+      totalStudents,
       averageScore: Math.round(averageScore * 10) / 10,
-      highestScore,
-      lowestScore,
+      highestScore: Math.round(highestScore * 100) / 100,
+      lowestScore: Math.round(lowestScore * 100) / 100,
+      passRate: totalStudents
+        ? Math.round((students.filter((student) => student.totalMarks / student.maxMarks >= 0.5).length / totalStudents) * 100)
+        : 0,
       cloAttainment,
-      questionDifficulty,
       scoreDistribution,
+      students: students.sort((first, second) =>
+        first.rollNumber.localeCompare(second.rollNumber, undefined, { numeric: true, sensitivity: 'base' }),
+      ),
     };
   }
 
-  async exportCSV(examId: string) {
-    const report = await this.getReport(examId);
-    const sheets = await this.sheetRepo.find({
-      where: { exam: { id: examId } },
-    });
-    const results = await this.resultRepo.find({
-      where: { answerSheet: { exam: { id: examId } } },
-      relations: ['answerSheet'],
-    });
+  async exportCSV(examId: string, user: User) {
+    const report = await this.getReport(examId, user);
+    const escapeCsv = (value: string | number) =>
+      `"${String(value).replace(/"/g, '""')}"`;
 
-    let csv = 'Student Name,Registration No,Total Marks,Max Marks,Percentage\n';
-    results.forEach((r) => {
-      const pct = Math.round((r.totalAiMark / r.totalMaxMarks) * 100);
-      csv += `${r.answerSheet.studentName},${r.answerSheet.registrationNo},${r.totalAiMark},${r.totalMaxMarks},${pct}%\n`;
-    });
+    const clos = report.cloAttainment;
+    const rows: (string | number)[][] = [
+      [
+        'Student Name',
+        'Roll Number',
+        'Total Marks',
+        'Max Marks',
+        'Percentage',
+        ...clos.flatMap((clo) => [
+          `${clo.clo} Earned Marks`,
+          `${clo.clo} Possible Marks`,
+          `${clo.clo} Attainment (%)`,
+        ]),
+      ],
+    ];
 
-    return csv;
+    for (const student of report.students) {
+      const studentClos = new Map(
+        student.cloScores.map((clo) => [clo.clo, clo]),
+      );
+      rows.push([
+        student.studentName,
+        student.rollNumber,
+        student.totalMarks,
+        student.maxMarks,
+        student.maxMarks
+          ? `${Math.round((student.totalMarks / student.maxMarks) * 1000) / 10}%`
+          : '0%',
+        ...clos.flatMap((clo): (string | number)[] => {
+          const score = studentClos.get(clo.clo);
+          return score
+            ? [score.earnedMarks, score.possibleMarks, score.attainmentPercent]
+            : ['', '', ''];
+        }),
+      ]);
+    }
+
+    rows.push([
+      'Class Average',
+      '',
+      report.totalStudents ? report.averageScore : 0,
+      report.totalStudents
+        ? Math.round(
+            (report.students.reduce((sum, student) => sum + student.maxMarks, 0) /
+              report.totalStudents) *
+              100,
+          ) / 100
+        : 0,
+      report.totalStudents && report.examTotalMarks
+        ? `${Math.round((report.averageScore / report.examTotalMarks) * 1000) / 10}%`
+        : '0%',
+      ...clos.flatMap((clo) => [
+        clo.totalStudents
+          ? Math.round((clo.earnedMarks / clo.totalStudents) * 100) / 100
+          : 0,
+        clo.totalStudents
+          ? Math.round((clo.possibleMarks / clo.totalStudents) * 100) / 100
+          : 0,
+        clo.attainmentPercent,
+      ]),
+    ]);
+
+    return rows.map((row) => row.map(escapeCsv).join(',')).join('\n');
   }
 }

@@ -529,6 +529,25 @@ export const uploadApi = {
     });
     return handleResponse<import('@/types').AnswerSheet[]>(res);
   },
+
+  getSheetPdf: async (examId: string, sheetId: string, signal?: AbortSignal) => {
+    const res = await fetch(`${BASE_URL}/uploads/${examId}/${sheetId}/file`, {
+      headers: authHeaders(),
+      signal,
+    });
+    if (!res.ok) {
+      return handleResponse<Blob>(res);
+    }
+    return res.blob();
+  },
+
+  deleteSheet: async (examId: string, sheetId: string) => {
+    const res = await fetch(`${BASE_URL}/uploads/${examId}/${sheetId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return handleResponse<{ message: string }>(res);
+  },
 };
 
 export const evaluationApi = {
