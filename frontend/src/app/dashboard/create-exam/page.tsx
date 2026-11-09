@@ -30,6 +30,7 @@ interface ExamMetaForm {
   course: string;
   term: string;
   totalMarks: number;
+  recheckDeadline: string;
 }
 
 const CLO_OPTIONS = ['CLO-1', 'CLO-2', 'CLO-3', 'CLO-4', 'CLO-5'];
@@ -363,6 +364,7 @@ export default function CreateExamPage() {
     try {
       const exam = await examApi.create({
         ...meta,
+        recheckDeadline: new Date(meta.recheckDeadline).toISOString(),
         questions: questions as Question[],
       });
       router.push(
@@ -458,6 +460,18 @@ export default function CreateExamPage() {
               {...register('totalMarks', {
                 required: 'Total marks required',
                 min: { value: 1, message: 'Must be at least 1' },
+              })}
+            />
+            <Input
+              label="Student recheck deadline"
+              type="datetime-local"
+              error={errors.recheckDeadline?.message}
+              hint="Students can submit a request until this date and time after results are published."
+              {...register('recheckDeadline', {
+                required: 'Set a recheck deadline before creating the exam.',
+                validate: (value) =>
+                  new Date(value).getTime() > Date.now() ||
+                  'Choose a future date and time.',
               })}
             />
           </div>

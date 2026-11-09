@@ -1,19 +1,40 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, MessageSquare } from 'lucide-react';
+import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import { authApi } from '@/lib/api';
-import type { PublishedStudentResult, User } from '@/types';
+import type { PublishedStudentResult, User, UserNotification } from '@/types';
 import { formatDate } from '@/lib/utils';
 
 export default function StudentResultsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [results, setResults] = useState<PublishedStudentResult[]>([]);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
+  const [openEntryId, setOpenEntryId] = useState<string | null>(null);
+  const [justifications, setJustifications] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [submittingEntryId, setSubmittingEntryId] = useState<string | null>(null);
+  const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const refreshResultsAndNotifications = useCallback(async () => {
+    try {
+      const [studentResults, studentNotifications] = await Promise.all([
+        authApi.getPublishedStudentResults(),
+        authApi.getNotifications(),
+      ]);
+      setResults(studentResults);
+      setNotifications(studentNotifications);
+      setError('');
+    } catch (refreshError: unknown) {
+      setError(refreshError instanceof Error ? refreshError.message : 'Unable to refresh your results and notifications.');
+    }
+  }, []);
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -29,16 +50,72 @@ export default function StudentResultsPage() {
     }
     setUser(storedUser);
 
-    Promise.all([authApi.getCurrentUser(), authApi.getPublishedStudentResults()])
-      .then(([currentUser, studentResults]) => {
+    Promise.all([
+      authApi.getCurrentUser(),
+      authApi.getPublishedStudentResults(),
+      authApi.getNotifications(),
+    ])
+      .then(([currentUser, studentResults, studentNotifications]) => {
         setUser(currentUser);
         setResults(studentResults);
+        setNotifications(studentNotifications);
       })
       .catch((loadError: unknown) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load your published results.');
       })
       .finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    const refresh = () => void refreshResultsAndNotifications();
+    const intervalId = window.setInterval(refresh, 30000);
+    window.addEventListener('autograde:notifications-updated', refresh);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('autograde:notifications-updated', refresh);
+    };
+  }, [loading, refreshResultsAndNotifications, user]);
+
+  const submitRequest = async (answerEntryId: string) => {
+    const justification = (justifications[answerEntryId] || '').trim();
+    if (justification.length < 50) {
+      setError('Please provide at least 50 characters explaining why this answer should be rechecked.');
+      return;
+    }
+    setSubmittingEntryId(answerEntryId);
+    setError('');
+    setNotice('');
+    try {
+      const response = await authApi.createRecheckRequest(answerEntryId, justification);
+      setNotice(response.message);
+      setOpenEntryId(null);
+      const updatedResults = await authApi.getPublishedStudentResults();
+      setResults(updatedResults);
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to submit your recheck request.');
+    } finally {
+      setSubmittingEntryId(null);
+    }
+  };
+
+  const markNotificationRead = async (notification: UserNotification) => {
+    setMarkingNotificationId(notification.id);
+    setError('');
+    try {
+      await authApi.markNotificationRead(notification.id);
+      setNotifications((current) =>
+        current.map((item) =>
+          item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item,
+        ),
+      );
+      window.dispatchEvent(new Event('autograde:notifications-updated'));
+    } catch (notificationError: unknown) {
+      setError(notificationError instanceof Error ? notificationError.message : 'Unable to update notification.');
+    } finally {
+      setMarkingNotificationId(null);
+    }
+  };
 
   if (!user) return null;
 
@@ -55,6 +132,39 @@ export default function StudentResultsPage() {
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           <AlertCircle size={15} className="mr-2 inline" />{error}
         </p>
+      )}
+      {notice && (
+        <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <CheckCircle2 size={15} className="mr-2 inline" />{notice}
+        </p>
+      )}
+
+      {!!notifications.length && (
+        <section className="space-y-3" aria-label="Notifications">
+          <h3 className="text-sm font-semibold text-[#1A1A1A]">Notifications</h3>
+          {notifications.map((notification) => (
+            <Card key={notification.id} padding="sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[#005461]">{notification.title}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[#444444]">{notification.message}</p>
+                  <p className="mt-2 text-xs text-[#888888]">{formatDate(notification.createdAt)}</p>
+                </div>
+                {!notification.readAt && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    loading={markingNotificationId === notification.id}
+                    disabled={markingNotificationId !== null}
+                    onClick={() => markNotificationRead(notification)}
+                  >
+                    Mark as read
+                  </Button>
+                )}
+              </div>
+            </Card>
+          ))}
+        </section>
       )}
 
       {loading ? (
@@ -81,6 +191,12 @@ export default function StudentResultsPage() {
                   </p>
                   <p className="mt-1 text-xs text-[#888888]">
                     Published {result.publishedAt ? formatDate(result.publishedAt) : 'recently'}
+                  </p>
+                  <p className="mt-1 text-xs text-[#666666]">
+                    Recheck deadline:{' '}
+                    <strong>
+                      {result.recheckDeadline ? new Date(result.recheckDeadline).toLocaleString() : 'Not configured'}
+                    </strong>
                   </p>
                 </div>
                 <div className="text-right">
@@ -120,6 +236,85 @@ export default function StudentResultsPage() {
                         <p className="mt-2 text-xs leading-5 text-[#666666]">
                           <span className="font-semibold text-[#005461]">Feedback:</span>{' '}
                           {question.feedback}
+                        </p>
+                      )}
+                      {question.recheckRequest ? (
+                        <div className={`mt-3 rounded-lg border px-3 py-3 text-sm ${
+                          question.recheckRequest.status === 'pending'
+                            ? 'border-amber-200 bg-amber-50 text-amber-900'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        }`}>
+                          <p className="font-semibold">
+                            {question.recheckRequest.status === 'pending'
+                              ? 'Recheck request pending'
+                              : question.recheckRequest.status === 'upheld'
+                                ? 'Original mark upheld'
+                                : 'Mark revised'}
+                          </p>
+                          {question.recheckRequest.status !== 'pending' && question.recheckRequest.decisionComment && (
+                            <p className="mt-1">Teacher comment: {question.recheckRequest.decisionComment}</p>
+                          )}
+                        </div>
+                      ) : result.recheckDeadline &&
+                        Date.now() <= new Date(result.recheckDeadline).getTime() ? (
+                        <div className="mt-3">
+                          {openEntryId === question.answerEntryId ? (
+                            <div className="space-y-2 rounded-lg border border-[#E8DCC8] bg-[#FFFDF8] p-3">
+                              <label className="block text-xs font-semibold text-[#1A1A1A]" htmlFor={`recheck-${question.answerEntryId}`}>
+                                Explain the reason for your request (at least 50 characters)
+                              </label>
+                              <textarea
+                                id={`recheck-${question.answerEntryId}`}
+                                value={justifications[question.answerEntryId] || ''}
+                                onChange={(event) => setJustifications((current) => ({
+                                  ...current,
+                                  [question.answerEntryId]: event.target.value,
+                                }))}
+                                rows={4}
+                                maxLength={3000}
+                                className="w-full rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#005461]"
+                                placeholder="Point out which part of your answer may have been overlooked and explain why it merits review."
+                              />
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className={`text-xs ${
+                                  (justifications[question.answerEntryId] || '').trim().length < 50
+                                    ? 'text-amber-700'
+                                    : 'text-emerald-700'
+                                }`}>
+                                  {(justifications[question.answerEntryId] || '').trim().length}/50 minimum characters
+                                </span>
+                                <div className="flex gap-2">
+                                  <Button variant="ghost" size="sm" onClick={() => setOpenEntryId(null)}>
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    loading={submittingEntryId === question.answerEntryId}
+                                    disabled={(justifications[question.answerEntryId] || '').trim().length < 50 || submittingEntryId !== null}
+                                    onClick={() => submitRequest(question.answerEntryId)}
+                                  >
+                                    Submit request
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setError('');
+                                setOpenEntryId(question.answerEntryId);
+                              }}
+                            >
+                              <MessageSquare size={14} className="mr-2" />
+                              Request a recheck
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-3 flex items-center gap-1 text-xs text-[#888888]">
+                          <Clock3 size={13} /> Recheck requests are closed.
                         </p>
                       )}
                     </div>

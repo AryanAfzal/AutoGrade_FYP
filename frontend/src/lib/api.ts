@@ -351,6 +351,30 @@ export const authApi = {
     return handleResponse<import('@/types').PublishedStudentResult[]>(res);
   },
 
+  createRecheckRequest: async (answerEntryId: string, justification: string) => {
+    const res = await fetch(`${BASE_URL}/student/recheck-requests`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ answerEntryId, justification }),
+    });
+    return handleResponse<{ id: string; status: 'pending'; message: string }>(res);
+  },
+
+  getNotifications: async () => {
+    const res = await fetch(`${BASE_URL}/student/notifications`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').UserNotification[]>(res);
+  },
+
+  markNotificationRead: async (id: string) => {
+    const res = await fetch(`${BASE_URL}/student/notifications/${id}/read`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+    });
+    return handleResponse<{ message: string }>(res);
+  },
+
   logout: () => {
     const token = getToken();
     if (token) {
@@ -427,12 +451,22 @@ export const examApi = {
     course: string;
     term: string;
     totalMarks: number;
+    recheckDeadline: string;
     questions: import('@/types').Question[];
   }) => {
     const res = await fetch(`${BASE_URL}/exams`, {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify(data),
+    });
+    return handleResponse<import('@/types').Exam>(res);
+  },
+
+  updateRecheckDeadline: async (id: string, recheckDeadline: string) => {
+    const res = await fetch(`${BASE_URL}/exams/${id}/recheck-deadline`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ recheckDeadline }),
     });
     return handleResponse<import('@/types').Exam>(res);
   },
@@ -571,6 +605,31 @@ export const evaluationApi = {
       publishedCount: number;
       examCompleted: boolean;
       publishedAt: string | null;
+    }>(res);
+  },
+
+  getTeacherRecheckRequests: async () => {
+    const res = await fetch(`${BASE_URL}/teacher/recheck-requests`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').TeacherRecheckRequest[]>(res);
+  },
+
+  decideRecheckRequest: async (
+    id: string,
+    payload: { decision: 'uphold'; comment: string } | { decision: 'revise'; comment: string; mark: number },
+  ) => {
+    const res = await fetch(`${BASE_URL}/teacher/recheck-requests/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<{
+      id: string;
+      status: 'upheld' | 'revised';
+      finalMark: number;
+      totalApprovedMark: number | null;
+      resolvedAt: string;
     }>(res);
   },
 };

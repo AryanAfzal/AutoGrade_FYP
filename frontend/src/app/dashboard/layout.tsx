@@ -58,6 +58,7 @@ export default function DashboardLayout({
       '/dashboard/upload-sheets',
       '/dashboard/ai-review',
       '/dashboard/analytics',
+      '/dashboard/recheck-requests',
       '/dashboard/exams',
       '/dashboard/uploads',
       '/dashboard/review',

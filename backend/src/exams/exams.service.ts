@@ -54,6 +54,10 @@ export class ExamsService {
     if (user.status !== 'APPROVED' || !assigned) {
       throw new UnauthorizedException('You may create exams only for subjects assigned to your approved teacher account.');
     }
+    const recheckDeadline = new Date(dto.recheckDeadline);
+    if (!Number.isFinite(recheckDeadline.getTime()) || recheckDeadline <= new Date()) {
+      throw new BadRequestException('The recheck deadline must be a valid future date and time.');
+    }
 
     for (const [index, question] of dto.questions.entries()) {
       if (question.type !== 'descriptive') continue;
@@ -98,6 +102,7 @@ export class ExamsService {
       course: dto.course,
       term: dto.term,
       totalMarks: dto.totalMarks,
+      recheckDeadline,
       createdBy: user,
     });
     const saved = await this.examRepo.save(exam);
@@ -130,6 +135,36 @@ export class ExamsService {
       throw new BadRequestException('Exam not found or you do not have access to it.');
     }
     return exam;
+  }
+
+  async updateRecheckDeadline(id: string, deadline: string, user: User) {
+    const exam = await this.examRepo.findOne({
+      where: { id, createdBy: { id: user.id } },
+    });
+    if (!exam) {
+      throw new NotFoundException('Exam not found or you do not have permission to change its recheck deadline.');
+    }
+    if (exam.recheckDeadline && new Date() > exam.recheckDeadline) {
+      const hasPublishedResults = await this.dataSource
+        .getRepository(StudentResult)
+        .findOne({
+          where: {
+            status: 'approved',
+            answerSheet: { exam: { id: exam.id } },
+          },
+          select: { id: true },
+        });
+      if (hasPublishedResults) {
+        throw new BadRequestException('The recheck deadline has already passed and cannot be extended.');
+      }
+    }
+
+    const recheckDeadline = new Date(deadline);
+    if (!Number.isFinite(recheckDeadline.getTime()) || recheckDeadline <= new Date()) {
+      throw new BadRequestException('The recheck deadline must be a valid future date and time.');
+    }
+    exam.recheckDeadline = recheckDeadline;
+    return this.examRepo.save(exam);
   }
 
   async delete(id: string, user: User) {

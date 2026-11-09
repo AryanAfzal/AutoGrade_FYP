@@ -14,6 +14,7 @@ import {
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
+import Input from '@/components/ui/Input';
 import { evaluationApi, examApi } from '@/lib/api';
 import type {
   AnswerEntry,
@@ -48,6 +49,8 @@ function AIReviewContent() {
   const [reviewingEntryId, setReviewingEntryId] = useState<string | null>(null);
   const [completingResultId, setCompletingResultId] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [recheckDeadline, setRecheckDeadline] = useState('');
+  const [savingDeadline, setSavingDeadline] = useState(false);
   const [filter, setFilter] = useState<'all' | 'flagged' | 'high-similarity'>('all');
 
   useEffect(() => {
@@ -73,6 +76,12 @@ function AIReviewContent() {
     ])
       .then(([examData, resultsData]) => {
         setExam(examData);
+        setRecheckDeadline('');
+        if (examData.recheckDeadline) {
+          const localDate = new Date(examData.recheckDeadline);
+          localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+          setRecheckDeadline(localDate.toISOString().slice(0, 16));
+        }
         setResults(resultsData.filter((r) => r.status === 'awaiting_approval'));
       })
       .catch((loadError: unknown) =>
@@ -182,6 +191,30 @@ function AIReviewContent() {
     }
   };
 
+  const handleSaveDeadline = async () => {
+    if (!examId || !recheckDeadline) {
+      setError('Choose a recheck deadline.');
+      return;
+    }
+    const deadline = new Date(recheckDeadline);
+    if (!Number.isFinite(deadline.getTime()) || deadline <= new Date()) {
+      setError('The recheck deadline must be in the future.');
+      return;
+    }
+    setSavingDeadline(true);
+    setError('');
+    setNotice('');
+    try {
+      const updatedExam = await examApi.updateRecheckDeadline(examId, deadline.toISOString());
+      setExam(updatedExam);
+      setNotice('Student recheck deadline saved.');
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save the recheck deadline.');
+    } finally {
+      setSavingDeadline(false);
+    }
+  };
+
   const handleCompleteReview = async (result: StudentResult) => {
     if (!examId) return;
     setError('');
@@ -207,7 +240,10 @@ function AIReviewContent() {
     ? results.find((r) => r.answersheetId === selectedStudentId)
     : null;
 
-  const canPublish = results.some((result) => !!result.reviewCompletedAt);
+  const canPublish =
+    results.some((result) => !!result.reviewCompletedAt) &&
+    !!exam?.recheckDeadline &&
+    new Date(exam.recheckDeadline).getTime() > Date.now();
 
   // Check if a student is involved in a high-similarity flag
   const studentHasSimilarity = (studentName: string) =>
@@ -262,20 +298,44 @@ function AIReviewContent() {
       {/* Exam info */}
       {exam && (
         <Card>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-sm font-semibold text-[#005461] uppercase tracking-wide">{exam.title}</p>
               <p className="text-xs text-[#888888] mt-1">{exam.course} · {exam.term}</p>
+              {exam.publishedAt && (
+                <p className="mt-2 text-xs text-[#888888]">
+                  Published {new Date(exam.publishedAt).toLocaleString()}
+                </p>
+              )}
             </div>
             <Badge variant={exam.status === 'published' ? 'success' : 'info'}>
               {exam.status === 'published' ? 'Published' : 'Awaiting Review'}
             </Badge>
-            {exam.publishedAt && (
-              <p className="mt-2 text-xs text-[#888888]">
-                Published {new Date(exam.publishedAt).toLocaleString()}
-              </p>
-            )}
           </div>
+          <div className="mt-5 flex flex-col gap-3 border-t border-[#E8DCC8] pt-4 sm:flex-row sm:items-end">
+            <Input
+              label="Student recheck deadline"
+              type="datetime-local"
+              value={recheckDeadline}
+              onChange={(event) => setRecheckDeadline(event.target.value)}
+              hint={exam.recheckDeadline
+                ? `Current deadline: ${new Date(exam.recheckDeadline).toLocaleString()}`
+                : 'Set a deadline so students know how long they have to request a recheck.'}
+            />
+            <Button
+              variant="secondary"
+              loading={savingDeadline}
+              disabled={savingDeadline || !recheckDeadline}
+              onClick={handleSaveDeadline}
+            >
+              Save deadline
+            </Button>
+          </div>
+          {!exam.recheckDeadline && (
+            <p className="mt-2 text-xs text-amber-800">
+              A future recheck deadline is required before results can be published.
+            </p>
+          )}
         </Card>
       )}
 

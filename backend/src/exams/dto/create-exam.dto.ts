@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsNumber, IsArray, ValidateNested, IsDateString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateQuestionDto } from './create-question.dto';
 
@@ -15,6 +15,9 @@ export class CreateExamDto {
   @Type(() => Number)
   @IsNumber()
   totalMarks: number;
+
+  @IsDateString()
+  recheckDeadline: string;
 
   @IsArray()
   @ValidateNested({ each: true })
