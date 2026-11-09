@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FilePlus, Upload, ClipboardCheck, BarChart3, BookOpen, Clock, X, UserCheck, AlertCircle } from 'lucide-react';
+import { FilePlus, Upload, ClipboardCheck, BarChart3, BookOpen, Clock, X, UserCheck, AlertCircle, Trash2 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -39,6 +39,8 @@ export default function TeacherDashboardPage() {
   const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
   const [requestError, setRequestError] = useState('');
   const [requestNotice, setRequestNotice] = useState('');
+  const [examError, setExamError] = useState('');
+  const [deletingExamId, setDeletingExamId] = useState<string | null>(null);
 
   useEffect(() => {
     const raw = localStorage.getItem('user');
@@ -94,6 +96,24 @@ export default function TeacherDashboardPage() {
       setRequestError(error instanceof Error ? error.message : 'Unable to update the enrollment request.');
     } finally {
       setProcessingIds((current) => current.filter((item) => item !== id));
+    }
+  };
+
+  const handleDeleteExam = async (exam: Exam) => {
+    const confirmed = window.confirm(
+      `Delete "${exam.title}"? This permanently removes the exam, uploaded answer sheets, evaluations, and results.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingExamId(exam.id);
+    setExamError('');
+    try {
+      await examApi.delete(exam.id);
+      setExams((current) => current.filter((item) => item.id !== exam.id));
+    } catch (error: unknown) {
+      setExamError(error instanceof Error ? error.message : 'Unable to delete this exam.');
+    } finally {
+      setDeletingExamId(null);
     }
   };
 
@@ -276,6 +296,11 @@ export default function TeacherDashboardPage() {
           </Button>
         </div>
 
+        {examError && (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            <AlertCircle size={15} className="mr-2 inline" />{examError}
+          </p>
+        )}
         {loading ? (
           <Card>
             <div className="flex items-center justify-center py-12">
@@ -302,7 +327,7 @@ export default function TeacherDashboardPage() {
           <div className="space-y-3">
             {exams.map((exam) => (
               <Card key={exam.id} padding="sm">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 bg-[#FFF8EB] rounded-lg flex items-center justify-center flex-shrink-0">
                       <BookOpen size={18} className="text-[#005461]" />
@@ -319,10 +344,20 @@ export default function TeacherDashboardPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <Badge variant={statusVariant[exam.status]}>{exam.status.replace('_', ' ')}</Badge>
                     <Button variant="secondary" size="sm" onClick={() => router.push(`/dashboard/upload-sheets?examId=${exam.id}`)}>
                       Manage
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      loading={deletingExamId === exam.id}
+                      disabled={deletingExamId !== null}
+                      onClick={() => handleDeleteExam(exam)}
+                    >
+                      <Trash2 size={14} className="mr-1.5" />
+                      Delete
                     </Button>
                   </div>
                 </div>

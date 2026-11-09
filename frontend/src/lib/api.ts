@@ -300,7 +300,12 @@ export const authApi = {
       headers: authHeaders(),
       body: JSON.stringify({ subjects }),
     });
-    return handleResponse<{ id: string; fullName: string; assignedSubjects: string[] }>(res);
+    return handleResponse<{
+      id: string;
+      fullName: string;
+      assignedSubjects: string[];
+      assignedCourseIds: string[];
+    }>(res);
   },
 
   getTeacherRequests: async () => {
@@ -317,6 +322,7 @@ export const authApi = {
     return handleResponse<{
       offerings: import('@/types').EnrollmentOffering[];
       enrollments: import('@/types').StudentEnrollment[];
+      department: { id: string; name: string; code: string } | null;
     }>(res);
   },
 
@@ -357,6 +363,64 @@ export const authApi = {
   },
 };
 
+async function institutionRequest<T>(path: string, options: RequestInit = {}) {
+  const method = options.method || 'GET';
+  try {
+    const res = await fetch(`${BASE_URL}/institutions${path}`, {
+      ...options,
+      headers: {
+        ...authHeaders(),
+        ...(options.headers || {}),
+      },
+    });
+    return await handleResponse<T>(res);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unexpected request failure.';
+    throw new Error(`${method} /institutions${path}: ${message}`);
+  }
+}
+
+export const institutionApi = {
+  getOverview: () => institutionRequest<{
+    departmentCount: number;
+    courseCount: number;
+    termCount: number;
+    userCount: number;
+    assignedUserCount: number;
+  }>('/overview'),
+  getDepartments: () => institutionRequest<import('@/types').Department[]>('/departments'),
+  createDepartment: (payload: Partial<import('@/types').Department>) =>
+    institutionRequest<import('@/types').Department>('/departments', { method: 'POST', body: JSON.stringify(payload) }),
+  updateDepartment: (id: string, payload: Partial<import('@/types').Department>) =>
+    institutionRequest<import('@/types').Department>(`/departments/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteDepartment: (id: string) => institutionRequest<{ message: string }>(`/departments/${id}`, { method: 'DELETE' }),
+  getCourses: () => institutionRequest<import('@/types').Course[]>('/courses'),
+  createCourse: (payload: Partial<import('@/types').Course>) =>
+    institutionRequest<import('@/types').Course>('/courses', { method: 'POST', body: JSON.stringify(payload) }),
+  updateCourse: (id: string, payload: Partial<import('@/types').Course>) =>
+    institutionRequest<import('@/types').Course>(`/courses/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteCourse: (id: string) => institutionRequest<{ message: string }>(`/courses/${id}`, { method: 'DELETE' }),
+  getTerms: () => institutionRequest<import('@/types').AcademicTerm[]>('/terms'),
+  createTerm: (payload: Partial<import('@/types').AcademicTerm>) =>
+    institutionRequest<import('@/types').AcademicTerm>('/terms', { method: 'POST', body: JSON.stringify(payload) }),
+  updateTerm: (id: string, payload: Partial<import('@/types').AcademicTerm>) =>
+    institutionRequest<import('@/types').AcademicTerm>(`/terms/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteTerm: (id: string) => institutionRequest<{ message: string }>(`/terms/${id}`, { method: 'DELETE' }),
+  getUsers: () => institutionRequest<import('@/types').User[]>('/users'),
+  assignUserDepartment: (id: string, departmentId: string | null) =>
+    institutionRequest<{ message: string; user: import('@/types').User }>(`/users/${id}/department`, {
+      method: 'PATCH',
+      body: JSON.stringify({ departmentId }),
+    }),
+  getStudentAssignments: () =>
+    institutionRequest<import('@/types').AdminStudentSubjectAssignment[]>('/student-assignments'),
+  assignStudentSubject: (studentId: string, teacherId: string, courseId: string) =>
+    institutionRequest<{ message: string; enrollment: import('@/types').AdminStudentSubjectAssignment }>(`/users/${studentId}/subjects`, {
+      method: 'POST',
+      body: JSON.stringify({ teacherId, courseId }),
+    }),
+};
+
 export const examApi = {
   create: async (data: {
     title: string;
@@ -385,6 +449,14 @@ export const examApi = {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').Exam>(res);
+  },
+
+  delete: async (id: string) => {
+    const res = await fetch(`${BASE_URL}/exams/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return handleResponse<{ message: string }>(res);
   },
 
   uploadPDF: async (file: File) => {

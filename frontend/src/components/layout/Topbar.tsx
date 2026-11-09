@@ -12,8 +12,16 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     subtitle: 'Overview of your exams and activity',
   },
   '/dashboard/admin': {
-    title: 'Admin Control Center',
-    subtitle: 'Synchronized multi-admin review of teacher and student applications',
+    title: 'Institution Dashboard',
+    subtitle: 'Overview of institution management and application review',
+  },
+  '/dashboard/admin/review': {
+    title: 'Application Review',
+    subtitle: 'Review teacher and student applications and assign department subjects',
+  },
+  '/dashboard/admin/institution': {
+    title: 'Institution Management',
+    subtitle: 'Manage departments, subjects, users, and academic terms',
   },
   '/dashboard/teacher': {
     title: 'Teacher Dashboard',
@@ -70,7 +78,7 @@ export default function Topbar() {
   };
 
   return (
-    <header className="fixed top-0 left-60 right-0 h-16 bg-white border-b border-[#E8DCC8] flex items-center justify-between px-8 z-40">
+    <header className="fixed top-0 left-60 right-0 h-16 bg-white border-b border-[#E8DCC8] shadow-[0_4px_18px_rgba(15,23,42,0.04)] flex items-center justify-between px-8 z-40">
       <div>
         <h1 className="text-base font-semibold text-[#1A1A1A]">
           {page.title}

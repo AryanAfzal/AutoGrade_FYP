@@ -14,6 +14,18 @@ import {
   BookOpen,
   ChevronDown,
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  CartesianGrid,
+  Cell,
+  LineChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
@@ -264,31 +276,33 @@ function AnalyticsContent() {
                 <BarChart3 size={16} className="text-[#005461]" />
                 Score Distribution
               </h3>
-              <div className="space-y-3">
-                {report.scoreDistribution.map((item, idx) => {
-                  const maxCount = Math.max(
-                    ...report.scoreDistribution.map((s) => s.count),
-                    1
-                  );
-                  return (
-                    <div key={idx}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-[#1A1A1A]">
-                          {item.range}%
-                        </span>
-                        <span className="text-xs text-[#888888]">
-                          {item.count} student{item.count !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-                      <div className="w-full bg-[#E8DCC8] rounded-full h-2">
-                        <div
-                          className="bg-[#005461] h-2 rounded-full transition-all duration-500"
-                          style={{ width: `${(item.count / maxCount) * 100}%` }}
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={report.scoreDistribution.map((item) => ({
+                      range: `${item.range}%`,
+                      students: item.count,
+                    }))}
+                    margin={{ top: 10, right: 10, left: -20, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8DCC8" />
+                    <XAxis dataKey="range" tick={{ fill: '#888888', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fill: '#888888', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      cursor={{ fill: '#FFF8EB' }}
+                      contentStyle={{ borderRadius: 10, border: '1px solid #E8DCC8', fontSize: 12 }}
+                      formatter={(value) => [`${value} students`, 'Students']}
+                    />
+                    <Bar dataKey="students" radius={[8, 8, 0, 0]} maxBarSize={58}>
+                      {report.scoreDistribution.map((_, index) => (
+                        <Cell
+                          key={index}
+                          fill={['#DC2626', '#F59E0B', '#EAB308', '#14B8A6', '#005461'][index]}
                         />
-                      </div>
-                    </div>
-                  );
-                })}
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </Card>
           )}
@@ -300,42 +314,34 @@ function AnalyticsContent() {
                 <Award size={16} className="text-[#005461]" />
                 Course Learning Outcome (CLO) Attainment
               </h3>
-              <div className="space-y-4">
-                {report.cloAttainment.map((clo, idx) => (
-                  <div
-                    key={idx}
-                    className="pb-4 border-b border-[#E8DCC8] last:pb-0 last:border-b-0"
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={report.cloAttainment.map((clo) => ({
+                      clo: clo.clo.length > 18 ? `${clo.clo.slice(0, 18)}…` : clo.clo,
+                      attainment: clo.attainmentPercent,
+                    }))}
+                    layout="vertical"
+                    margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <p className="text-sm font-medium text-[#1A1A1A]">{clo.clo}</p>
-                        <p className="text-xs text-[#888888]">
-                          {clo.studentsMet} of {clo.totalStudents} students met target (≥50%)
-                        </p>
-                      </div>
-                      <Badge
-                        variant={
-                          clo.attainmentPercent >= 75
-                            ? 'success'
-                            : clo.attainmentPercent >= 50
-                            ? 'amber'
-                            : 'danger'
-                        }
-                      >
-                        {clo.attainmentPercent}%
-                      </Badge>
-                    </div>
-                    <div className="w-full bg-[#E8DCC8] rounded-full h-2.5">
-                      <div
-                        className={cn(
-                          'h-2.5 rounded-full transition-all duration-500',
-                          getCLOAttainmentColor(clo.attainmentPercent)
-                        )}
-                        style={{ width: `${clo.attainmentPercent}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E8DCC8" />
+                    <XAxis type="number" domain={[0, 100]} tick={{ fill: '#888888', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="clo" width={100} tick={{ fill: '#444444', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      cursor={{ fill: '#FFF8EB' }}
+                      contentStyle={{ borderRadius: 10, border: '1px solid #E8DCC8', fontSize: 12 }}
+                      formatter={(value) => [`${value}%`, 'Attainment']}
+                    />
+                    <Bar dataKey="attainment" fill="#005461" radius={[0, 8, 8, 0]} maxBarSize={24}>
+                      {report.cloAttainment.map((clo, index) => (
+                        <Cell
+                          key={index}
+                          fill={clo.attainmentPercent >= 75 ? '#059669' : clo.attainmentPercent >= 50 ? '#F59E0B' : '#DC2626'}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </Card>
           )}
@@ -347,6 +353,34 @@ function AnalyticsContent() {
                 <BookOpen size={16} className="text-[#005461]" />
                 Question Difficulty Index
               </h3>
+              <div className="h-[280px] w-full mb-5">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={report.questionDifficulty.map((question, index) => ({
+                      question: `Q${index + 1}`,
+                      attained: Math.round(question.difficultyIndex * 100),
+                    }))}
+                    margin={{ top: 10, right: 20, left: -20, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8DCC8" />
+                    <XAxis dataKey="question" tick={{ fill: '#888888', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fill: '#888888', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      cursor={{ stroke: '#E8DCC8' }}
+                      contentStyle={{ borderRadius: 10, border: '1px solid #E8DCC8', fontSize: 12 }}
+                      formatter={(value) => [`${value}%`, 'Average attainment']}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="attained"
+                      stroke="#005461"
+                      strokeWidth={3}
+                      dot={{ r: 5, fill: '#FFFFFF', stroke: '#005461', strokeWidth: 3 }}
+                      activeDot={{ r: 7, fill: '#FAB963', stroke: '#FFFFFF', strokeWidth: 2 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
               <div className="space-y-2">
                 {report.questionDifficulty.map((q, idx) => (
                   <Card

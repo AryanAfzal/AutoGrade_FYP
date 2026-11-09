@@ -17,6 +17,8 @@ import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { StudentEnrollment } from '../users/entities/student-enrollment.entity';
 import { Exam } from '../exams/entities/exam.entity';
+import { Course } from '../institutions/entities/course.entity';
+import { Department } from '../institutions/entities/department.entity';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -41,6 +43,10 @@ export class AuthService implements OnModuleInit {
     private enrollmentRepo: Repository<StudentEnrollment>,
     @InjectRepository(Exam)
     private examRepo: Repository<Exam>,
+    @InjectRepository(Course)
+    private courseRepo: Repository<Course>,
+    @InjectRepository(Department)
+    private departmentRepo: Repository<Department>,
   ) {}
 
   async onModuleInit() {
@@ -65,6 +71,33 @@ export class AuthService implements OnModuleInit {
 
   private normalizeEmail(email: string) {
     return email.trim().toLowerCase();
+  }
+
+  private async getUserDepartment(user: User): Promise<Department | null> {
+    if (user.departmentId) {
+      const byId = await this.departmentRepo.findOne({ where: { id: user.departmentId } });
+      if (byId) return byId;
+    }
+    if (!user.department?.trim()) return null;
+    const byName = await this.departmentRepo
+      .createQueryBuilder('department')
+      .where('LOWER(department.name) = LOWER(:name)', { name: user.department.trim() })
+      .getOne();
+    if (byName && user.departmentId !== byName.id) {
+      await this.usersService.update(user.id, { departmentId: byName.id, department: byName.name });
+    }
+    return byName;
+  }
+
+  private teacherHasCourse(teacher: User, course: Course) {
+    if (teacher.assignedCourseIds?.length) {
+      return teacher.assignedCourseIds.includes(course.id);
+    }
+    return (teacher.assignedSubjects || []).some((subject) => {
+      const normalized = subject.trim().toLowerCase();
+      return normalized === course.title.trim().toLowerCase()
+        || normalized === course.code.trim().toLowerCase();
+    });
   }
 
   getAllowedAdminEmails(): string[] {
@@ -131,8 +164,10 @@ export class AuthService implements OnModuleInit {
       course: user.course,
       teacherId: user.teacherId,
       department: user.department,
+      departmentId: user.departmentId,
       qualification: user.qualification,
       assignedSubjects: user.assignedSubjects || [],
+      assignedCourseIds: user.assignedCourseIds || [],
     };
   }
 
@@ -654,50 +689,47 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Only approved student accounts can browse available subjects.');
     }
 
-    const teachers = (await this.usersService.findByRole('teacher')).filter(
-      (teacher) => teacher.status === 'APPROVED',
-    );
-    const teacherIds = teachers.map((teacher) => teacher.id);
-    const examSubjects = teacherIds.length
-      ? await this.examRepo
-          .createQueryBuilder('exam')
-          .innerJoin('exam.createdBy', 'teacher')
-          .select('teacher.id', 'teacherId')
-          .addSelect('exam.course', 'subject')
-          .where('teacher.id IN (:...teacherIds)', { teacherIds })
-          .getRawMany<{ teacherId: string; subject: string }>()
+    const studentDepartmentRecord = await this.getUserDepartment(student);
+    const studentDepartment = studentDepartmentRecord?.active ? studentDepartmentRecord : null;
+    const teachers = studentDepartment
+      ? (await this.usersService.findByRole('teacher')).filter(
+          (teacher) => teacher.status === 'APPROVED',
+        )
       : [];
-    const subjectsByTeacher = new Map<string, Map<string, string>>();
-    for (const teacher of teachers) {
-      const subjects = new Map<string, string>();
-      for (const subject of teacher.assignedSubjects || []) {
-        const normalized = subject.trim();
-        if (normalized) subjects.set(normalized.toLowerCase(), normalized);
-      }
-      subjectsByTeacher.set(teacher.id, subjects);
-    }
-    for (const { teacherId, subject } of examSubjects) {
-      const normalized = subject.trim();
-      if (normalized) {
-        subjectsByTeacher
-          .get(teacherId)
-          ?.set(normalized.toLowerCase(), normalized);
-      }
-    }
-    const enrollments = await this.enrollmentRepo.find({
+    const courses = studentDepartment
+      ? await this.courseRepo.find({
+          where: { departmentId: studentDepartment.id, active: true },
+          order: { code: 'ASC' },
+        })
+      : [];
+    const offerings = (await Promise.all(teachers.map(async (teacher) => {
+      const teacherDepartment = await this.getUserDepartment(teacher);
+      if (!teacherDepartment?.active || teacherDepartment.id !== studentDepartment?.id) return [];
+      return courses
+        .filter((course) => this.teacherHasCourse(teacher, course))
+        .map((course) => ({
+          teacherId: teacher.id,
+          teacherName: teacher.fullName,
+          subject: course.title,
+          subjectCode: course.code,
+          departmentId: course.departmentId,
+        }));
+    }))).flat();
+    const allEnrollments = await this.enrollmentRepo.find({
       where: { student: { id: studentId } },
       relations: ['teacher'],
       order: { requestedAt: 'DESC' },
     });
+    const enrollments = [];
+    for (const enrollment of allEnrollments) {
+      if (!studentDepartment || (await this.getUserDepartment(enrollment.teacher))?.id !== studentDepartment.id) continue;
+      const course = courses.find((item) => item.title.trim().toLowerCase() === enrollment.subject.trim().toLowerCase());
+      if (course && this.teacherHasCourse(enrollment.teacher, course)) {
+        enrollments.push(enrollment);
+      }
+    }
 
     return {
-      offerings: teachers.flatMap((teacher) =>
-        [...(subjectsByTeacher.get(teacher.id)?.values() || [])].map((subject) => ({
-          teacherId: teacher.id,
-          teacherName: teacher.fullName,
-          subject,
-        })),
-      ),
       enrollments: enrollments.map((enrollment) => ({
         id: enrollment.id,
         teacherId: enrollment.teacher.id,
@@ -706,7 +738,11 @@ export class AuthService implements OnModuleInit {
         status: enrollment.status,
         rejectionReason: enrollment.rejectionReason,
         requestedAt: enrollment.requestedAt,
-      })),
+        })),
+      offerings,
+      department: studentDepartment
+        ? { id: studentDepartment.id, name: studentDepartment.name, code: studentDepartment.code }
+        : null,
     };
   }
 
@@ -718,23 +754,31 @@ export class AuthService implements OnModuleInit {
 
     const normalizedSubject = subject.trim();
     const teacher = await this.usersService.findById(teacherId);
-    let teacherOffersSubject = false;
-    if (teacher?.role === 'teacher' && teacher.status === 'APPROVED') {
-      teacherOffersSubject = (teacher.assignedSubjects || []).some(
-        (assignedSubject) =>
-          assignedSubject.trim().toLowerCase() === normalizedSubject.toLowerCase(),
-      );
-      if (!teacherOffersSubject) {
-        teacherOffersSubject = await this.examRepo
-          .createQueryBuilder('exam')
-          .innerJoin('exam.createdBy', 'teacher')
-          .where('teacher.id = :teacherId', { teacherId })
-          .andWhere('LOWER(TRIM(exam.course)) = :subject', {
-            subject: normalizedSubject.toLowerCase(),
-          })
-          .getExists();
-      }
-    }
+    const studentDepartment = await this.getUserDepartment(student);
+    const teacherDepartment = teacher ? await this.getUserDepartment(teacher) : null;
+    const normalized = normalizedSubject.toLowerCase();
+    const course = studentDepartment
+      ? await this.courseRepo.createQueryBuilder('course')
+          .where('course.departmentId = :departmentId', { departmentId: studentDepartment.id })
+          .andWhere('course.active = :active', { active: true })
+          .andWhere('(LOWER(course.title) = :subject OR LOWER(course.code) = :subject)', { subject: normalized })
+          .getOne()
+      : null;
+    const teacherOffersSubject = Boolean(
+      teacher &&
+      teacher.status === 'APPROVED' &&
+      studentDepartment &&
+      studentDepartment.active &&
+      teacherDepartment?.active &&
+      teacherDepartment?.id === studentDepartment.id &&
+      course &&
+      ((teacher.assignedCourseIds || []).length
+        ? teacher.assignedCourseIds.includes(course.id)
+        : (teacher.assignedSubjects || []).some((assigned) => {
+            const value = assigned.trim().toLowerCase();
+            return value === normalized || value === course.title.trim().toLowerCase() || value === course.code.trim().toLowerCase();
+          })),
+    );
     if (
       !teacher ||
       teacher.role !== 'teacher' ||
@@ -744,17 +788,18 @@ export class AuthService implements OnModuleInit {
       throw new BadRequestException('The selected teacher does not currently offer this subject.');
     }
 
+    const subjectName = course!.title;
     const existingEnrollment = await this.enrollmentRepo.findOne({
-      where: { student: { id: studentId }, subject: normalizedSubject },
+      where: { student: { id: studentId }, subject: subjectName },
       relations: ['teacher'],
     });
     if (existingEnrollment) {
       if (existingEnrollment.status !== 'REJECTED') {
         throw new BadRequestException(
-          `Your request for ${normalizedSubject} is already ${existingEnrollment.status.toLowerCase()}.`,
+          `Your request for ${subjectName} is already ${existingEnrollment.status.toLowerCase()}.`,
         );
       }
-      existingEnrollment.teacher = teacher;
+      existingEnrollment.teacher = teacher!;
       existingEnrollment.status = 'PENDING';
       existingEnrollment.rejectionReason = null;
       existingEnrollment.requestedAt = new Date();
@@ -765,7 +810,7 @@ export class AuthService implements OnModuleInit {
         enrollment: {
           id: existingEnrollment.id,
           subject: existingEnrollment.subject,
-          teacherName: teacher.fullName,
+          teacherName: teacher!.fullName,
           status: existingEnrollment.status,
         },
       };
@@ -773,8 +818,8 @@ export class AuthService implements OnModuleInit {
 
     const enrollment = this.enrollmentRepo.create({
       student,
-      teacher,
-      subject: normalizedSubject,
+      teacher: teacher!,
+      subject: subjectName,
       status: 'PENDING',
     });
     await this.enrollmentRepo.save(enrollment);
@@ -791,19 +836,24 @@ export class AuthService implements OnModuleInit {
 
   async getTeacherApplications() {
     const teachers = await this.usersService.findByRole('teacher');
-    return teachers.map((teacher) => ({
+    return Promise.all(teachers.map(async (teacher) => {
+      const department = await this.getUserDepartment(teacher);
+      return {
       id: teacher.id,
       fullName: teacher.fullName,
       email: teacher.email,
       university: teacher.university || 'COMSATS University Islamabad, Wah Campus',
       phone: teacher.phone,
-      department: teacher.department,
+      department: department?.name || teacher.department,
+      departmentId: department?.id || null,
       qualification: teacher.qualification,
       status: teacher.status,
       rejectionReason: teacher.rejectionReason,
       requestedAt: teacher.requestedAt,
       approvedAt: teacher.approvedAt,
       assignedSubjects: teacher.assignedSubjects || [],
+      assignedCourseIds: teacher.assignedCourseIds || [],
+      };
     }));
   }
 
@@ -859,35 +909,60 @@ export class AuthService implements OnModuleInit {
       throw new BadRequestException('Approve the teacher before assigning subjects.');
     }
 
-    const requestedSubjects = subjects.map((subject) => subject.trim()).filter(Boolean);
-    if (requestedSubjects.length === 0) {
-      throw new BadRequestException('Assign at least one subject.');
+    const department = await this.getUserDepartment(teacher);
+    if (!department) {
+      throw new BadRequestException('Assign the teacher to a department before assigning subjects.');
     }
-
-    const subjectMap = new Map<string, string>();
-    for (const subject of [...(teacher.assignedSubjects || []), ...requestedSubjects]) {
-      const normalized = subject.trim();
-      if (normalized) {
-        subjectMap.set(normalized.toLowerCase(), normalized);
-      }
+    const requestedSubjects = [...new Set(subjects.map((subject) => subject.trim().toLowerCase()).filter(Boolean))];
+    const courses = await this.courseRepo.find({
+      where: { departmentId: department.id, active: true },
+    });
+    const selectedCourses = requestedSubjects.map((subject) =>
+      courses.find((course) =>
+        course.id === subject ||
+        course.title.trim().toLowerCase() === subject ||
+        course.code.trim().toLowerCase() === subject,
+      ),
+    );
+    if (selectedCourses.some((course) => !course)) {
+      throw new BadRequestException("Assign only active subjects belonging to the teacher's department.");
     }
     const updated = await this.usersService.update(id, {
-      assignedSubjects: [...subjectMap.values()],
+      assignedSubjects: selectedCourses.map((course) => course!.title),
+      assignedCourseIds: selectedCourses.map((course) => course!.id),
     });
     return {
       id: updated.id,
       fullName: updated.fullName,
       assignedSubjects: updated.assignedSubjects || [],
+      assignedCourseIds: updated.assignedCourseIds || [],
     };
   }
 
   async getTeacherRequests(teacherId: string) {
+    const teacher = await this.usersService.findById(teacherId);
+    if (!teacher || teacher.role !== 'teacher') {
+      throw new NotFoundException('Teacher not found.');
+    }
+    const teacherDepartment = await this.getUserDepartment(teacher);
     const enrollments = await this.enrollmentRepo.find({
       where: { teacher: { id: teacherId } },
       relations: ['student', 'teacher'],
       order: { requestedAt: 'DESC' },
     });
-    return enrollments.map((enrollment) => ({
+    const visibleEnrollments = [];
+    for (const enrollment of enrollments) {
+      if (!teacherDepartment?.active) continue;
+      const studentDepartment = await this.getUserDepartment(enrollment.student);
+      if (!studentDepartment?.active || studentDepartment.id !== teacherDepartment.id) continue;
+      const course = await this.courseRepo.createQueryBuilder('course')
+        .where('course.departmentId = :departmentId', { departmentId: teacherDepartment.id })
+        .andWhere('course.active = :active', { active: true })
+        .andWhere('LOWER(course.title) = :subject', { subject: enrollment.subject.trim().toLowerCase() })
+        .getOne();
+      if (course && this.teacherHasCourse(teacher, course)) visibleEnrollments.push(enrollment);
+    }
+    return visibleEnrollments.map((enrollment) => ({
       id: enrollment.id,
       fullName: enrollment.student.fullName,
       email: enrollment.student.email,
@@ -934,20 +1009,27 @@ export class AuthService implements OnModuleInit {
       }
       const teacher = enrollment.teacher;
       const normalizedSubject = enrollment.subject.trim().toLowerCase();
-      let teacherOffersSubject = (teacher.assignedSubjects || []).some(
-        (s) => s.trim().toLowerCase() === normalizedSubject,
-      );
-      if (!teacherOffersSubject) {
-        teacherOffersSubject = await manager
-          .createQueryBuilder(Exam, 'exam')
-          .innerJoin('exam.createdBy', 'teacher')
-          .where('teacher.id = :teacherId', { teacherId })
-          .andWhere('LOWER(TRIM(exam.course)) = :subject', {
-            subject: normalizedSubject,
-          })
-          .getExists();
-      }
-      if (teacher.status !== 'APPROVED' || !teacherOffersSubject) {
+      const studentDepartment = await this.getUserDepartment(enrollment.student);
+      const teacherDepartment = await this.getUserDepartment(teacher);
+      const departmentSubject = studentDepartment && studentDepartment.id === teacherDepartment?.id
+        ? await manager
+            .createQueryBuilder(Course, 'course')
+            .where('course.departmentId = :departmentId', { departmentId: studentDepartment.id })
+            .andWhere('course.active = :active', { active: true })
+            .andWhere('LOWER(course.title) = :subject', { subject: normalizedSubject })
+            .getOne()
+        : null;
+      const teacherOffersSubject = departmentSubject &&
+        ((teacher.assignedCourseIds || []).length
+          ? teacher.assignedCourseIds.includes(departmentSubject.id)
+          : (teacher.assignedSubjects || []).some((assigned) => assigned.trim().toLowerCase() === normalizedSubject));
+      if (
+        teacher.status !== 'APPROVED' ||
+        enrollment.student.status !== 'APPROVED' ||
+        !studentDepartment?.active ||
+        !teacherDepartment?.active ||
+        !teacherOffersSubject
+      ) {
         throw new UnauthorizedException('You are no longer approved to teach this subject.');
       }
 

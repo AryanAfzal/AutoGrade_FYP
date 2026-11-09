@@ -17,8 +17,42 @@ export interface User {
   course?: string | null;
   teacherId?: string | null;
   department?: string | null;
+  departmentId?: string | null;
   qualification?: string | null;
   assignedSubjects?: string[];
+  assignedCourseIds?: string[];
+}
+
+export interface Department {
+  id: string;
+  name: string;
+  code: string;
+  description?: string | null;
+  head?: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Course {
+  id: string;
+  title: string;
+  code: string;
+  departmentId?: string | null;
+  departmentName?: string | null;
+  creditHours: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AcademicTerm {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  current: boolean;
+  status: 'UPCOMING' | 'ACTIVE' | 'CLOSED';
 }
 
 export interface AuthResponse {
@@ -35,12 +69,14 @@ export interface TeacherApplication {
   university?: string | null;
   phone: string | null;
   department: string | null;
+  departmentId?: string | null;
   qualification: string | null;
   status: UserAccountStatus;
   rejectionReason: string | null;
   requestedAt: string | null;
   approvedAt: string | null;
   assignedSubjects: string[];
+  assignedCourseIds?: string[];
 }
 
 export interface TeacherEnrollmentRequest {
@@ -71,6 +107,8 @@ export interface EnrollmentOffering {
   teacherId: string;
   teacherName: string;
   subject: string;
+  subjectCode?: string;
+  departmentId?: string | null;
 }
 
 export interface StudentEnrollment {
@@ -81,6 +119,16 @@ export interface StudentEnrollment {
   status: UserAccountStatus;
   rejectionReason: string | null;
   requestedAt: string;
+}
+
+export interface AdminStudentSubjectAssignment {
+  id: string;
+  studentId: string;
+  studentName: string;
+  teacherId: string;
+  teacherName: string;
+  subject: string;
+  status: UserAccountStatus;
 }
 
 export interface PublishedStudentResult {
@@ -94,6 +142,7 @@ export interface PublishedStudentResult {
   publishedAt: string | null;
   questions: {
     questionText: string;
+    studentAnswer: string;
     mark: number | null;
     maxMarks: number;
     feedback: string | null;
