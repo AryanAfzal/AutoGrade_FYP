@@ -49,11 +49,17 @@ export class User {
   @Column({ nullable: true })
   department: string | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  departmentId: string | null;
+
   @Column({ nullable: true })
   qualification: string | null;
 
   @Column('simple-array', { nullable: true })
   assignedSubjects: string[] | null;
+
+  @Column('simple-array', { nullable: true })
+  assignedCourseIds: string[] | null;
 
   @Column({ nullable: true })
   approvedByTeacherId: string | null;

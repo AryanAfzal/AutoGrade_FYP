@@ -10,11 +10,13 @@ import { RolesGuard } from './guards/roles.guard';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { StudentEnrollment } from '../users/entities/student-enrollment.entity';
 import { Exam } from '../exams/entities/exam.entity';
+import { Course } from '../institutions/entities/course.entity';
+import { Department } from '../institutions/entities/department.entity';
 
 @Module({
   imports: [
     UsersModule,
-    TypeOrmModule.forFeature([StudentEnrollment, Exam]),
+    TypeOrmModule.forFeature([StudentEnrollment, Exam, Course, Department]),
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],

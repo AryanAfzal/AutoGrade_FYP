@@ -12,8 +12,16 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     subtitle: 'Overview of your exams and activity',
   },
   '/dashboard/admin': {
-    title: 'Admin Control Center',
-    subtitle: 'Synchronized multi-admin review of teacher and student applications',
+    title: 'Institution Dashboard',
+    subtitle: 'Overview of institution management and application review',
+  },
+  '/dashboard/admin/review': {
+    title: 'Application Review',
+    subtitle: 'Review teacher and student applications and assign department subjects',
+  },
+  '/dashboard/admin/institution': {
+    title: 'Institution Management',
+    subtitle: 'Manage departments, subjects, users, and academic terms',
   },
   '/dashboard/teacher': {
     title: 'Teacher Dashboard',

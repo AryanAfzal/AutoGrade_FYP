@@ -1,20 +1,57 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Exam } from './entities/exam.entity';
 import { Question } from './entities/question.entity';
 import { CreateExamDto } from './dto/create-exam.dto';
 import { User } from '../users/entities/user.entity';
+import { Course } from '../institutions/entities/course.entity';
+import { Department } from '../institutions/entities/department.entity';
+import { AnswerSheet } from '../uploads/entities/answer-sheet.entity';
+import { StudentResult } from '../evaluation/entities/student-result.entity';
+import { AnswerEntry } from '../evaluation/entities/answer-entry.entity';
+import { ReviewAudit } from '../evaluation/entities/review-audit.entity';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 @Injectable()
 export class ExamsService {
+  private readonly logger = new Logger(ExamsService.name);
+
   constructor(
     @InjectRepository(Exam) private examRepo: Repository<Exam>,
     @InjectRepository(Question) private questionRepo: Repository<Question>,
+    @InjectRepository(Course) private courseRepo: Repository<Course>,
+    @InjectRepository(Department) private departmentRepo: Repository<Department>,
+    private dataSource: DataSource,
   ) {}
 
   async create(dto: CreateExamDto, user: User) {
-    if (user.status !== 'APPROVED' || !(user.assignedSubjects || []).includes(dto.course)) {
+    let department = user.departmentId
+      ? await this.departmentRepo.findOne({ where: { id: user.departmentId, active: true } })
+      : null;
+    if (!department && user.department?.trim()) {
+      department = await this.departmentRepo
+        .createQueryBuilder('department')
+        .where('LOWER(department.name) = LOWER(:name)', { name: user.department.trim() })
+        .andWhere('department.active = :active', { active: true })
+        .getOne();
+    }
+    const course = department
+      ? await this.courseRepo.createQueryBuilder('course')
+          .where('course.departmentId = :departmentId', { departmentId: department.id })
+          .andWhere('course.active = :active', { active: true })
+          .andWhere('LOWER(course.title) = LOWER(:title)', { title: dto.course.trim() })
+          .getOne()
+      : null;
+    const assigned = course && (
+      user.assignedCourseIds?.length
+        ? user.assignedCourseIds.includes(course.id)
+        : (user.assignedSubjects || []).some(
+            (subject) => subject.trim().toLowerCase() === course.title.trim().toLowerCase(),
+          )
+    );
+    if (user.status !== 'APPROVED' || !assigned) {
       throw new UnauthorizedException('You may create exams only for subjects assigned to your approved teacher account.');
     }
 
@@ -93,5 +130,74 @@ export class ExamsService {
       throw new BadRequestException('Exam not found or you do not have access to it.');
     }
     return exam;
+  }
+
+  async delete(id: string, user: User) {
+    const exam = await this.examRepo.findOne({
+      where: { id, createdBy: { id: user.id } },
+      select: { id: true, title: true },
+    });
+    if (!exam) {
+      throw new NotFoundException('Exam not found or you do not have permission to delete it.');
+    }
+
+    const filesToDelete = await this.dataSource.transaction(async (manager) => {
+      const sheetRepo = manager.getRepository(AnswerSheet);
+      const resultRepo = manager.getRepository(StudentResult);
+      const entryRepo = manager.getRepository(AnswerEntry);
+      const auditRepo = manager.getRepository(ReviewAudit);
+      const sheets = await sheetRepo.find({
+        where: { exam: { id } },
+        select: { id: true, filePath: true },
+      });
+      const sheetIds = sheets.map((sheet) => sheet.id);
+
+      if (sheetIds.length) {
+        const results = await resultRepo.find({
+          where: { answerSheet: { id: In(sheetIds) } },
+          select: { id: true },
+        });
+        const resultIds = results.map((result) => result.id);
+        if (resultIds.length) {
+          const entries = await entryRepo.find({
+            where: { result: { id: In(resultIds) } },
+            select: { id: true },
+          });
+          const entryIds = entries.map((entry) => entry.id);
+          if (entryIds.length) {
+            const audits = await auditRepo.find({
+              where: { answerEntry: { id: In(entryIds) } },
+              select: { id: true },
+            });
+            if (audits.length) await auditRepo.delete(audits.map((audit) => audit.id));
+            await entryRepo.delete(entryIds);
+          }
+          await resultRepo.delete(resultIds);
+        }
+        await sheetRepo.delete(sheetIds);
+      }
+
+      await manager.getRepository(Exam).delete({ id });
+      return sheets.map((sheet) => sheet.filePath);
+    });
+
+    const uploadsDirectory = path.resolve(process.cwd(), 'uploads');
+    for (const filePath of filesToDelete) {
+      const resolvedPath = path.resolve(filePath);
+      const relativePath = path.relative(uploadsDirectory, resolvedPath);
+      if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+        this.logger.warn(`Skipped deleting answer file outside uploads directory: ${resolvedPath}`);
+        continue;
+      }
+      try {
+        await fs.unlink(resolvedPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          this.logger.error(`Exam ${exam.id} was deleted, but answer file cleanup failed: ${resolvedPath}`, error instanceof Error ? error.stack : String(error));
+        }
+      }
+    }
+
+    return { message: `Exam "${exam.title}" and its uploaded answer sheets and results were deleted.` };
   }
 }

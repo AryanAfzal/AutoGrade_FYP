@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   GraduationCap,
   UserCircle2,
+  Building2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authApi, getStoredUser } from '@/lib/api';
@@ -29,13 +30,14 @@ const teacherNavItems = [
 
 const adminNavItems = [
   { label: 'Dashboard', href: '/dashboard/admin', icon: LayoutDashboard },
-  { label: 'Review & Assign Subjects', href: '/dashboard/admin#teacher-applications', icon: ShieldCheck },
+  { label: 'Institution Management', href: '/dashboard/admin/institution', icon: Building2 },
+  { label: 'Applications & Subjects', href: '/dashboard/admin/review', icon: ShieldCheck },
   { label: 'Profile & Settings', href: '/dashboard/profile', icon: UserCircle2 },
 ];
 
 const studentNavItems = [
   { label: 'Dashboard', href: '/dashboard/student', icon: LayoutDashboard },
-  { label: 'Results', href: '/dashboard/student#results', icon: GraduationCap },
+  { label: 'Results', href: '/dashboard/student/results', icon: GraduationCap },
   { label: 'Profile & Settings', href: '/dashboard/profile', icon: UserCircle2 },
 ];
 
@@ -91,8 +93,8 @@ export default function Sidebar() {
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map(({ label, href, icon: Icon }) => {
           const route = href.split('#')[0];
-          const hasHash = href.includes('#');
-          const active = !hasHash && (pathname === route || (route !== '/dashboard' && pathname.startsWith(route)));
+          const dashboardRoot = ['/dashboard/admin', '/dashboard/student', '/dashboard/teacher'].includes(route);
+          const active = pathname === route || (!dashboardRoot && route !== '/dashboard' && pathname.startsWith(`${route}/`));
 
           return (
             <button

@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Body, Param,
+  Controller, Get, Post, Body, Param, Delete,
   UseGuards, Request, UseInterceptors, UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -32,6 +32,11 @@ export class ExamsController {
   @Get(':id')
   findOne(@Param('id') id: string, @Request() req) {
     return this.examsService.findOne(id, req.user);
+  }
+
+  @Delete(':id')
+  delete(@Param('id') id: string, @Request() req) {
+    return this.examsService.delete(id, req.user);
   }
 
   @Post('parse-pdf')
