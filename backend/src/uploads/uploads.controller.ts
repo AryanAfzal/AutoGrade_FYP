@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Param,
+  Controller, Post, Get, Param, Delete, Request,
   UseGuards, UseInterceptors, UploadedFiles,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
@@ -34,5 +34,14 @@ export class UploadsController {
   @Get(':examId')
   getSheets(@Param('examId') examId: string) {
     return this.uploadsService.getSheets(examId);
+  }
+
+  @Delete(':examId/:sheetId')
+  deleteSheet(
+    @Param('examId') examId: string,
+    @Param('sheetId') sheetId: string,
+    @Request() req,
+  ) {
+    return this.uploadsService.deleteSheet(examId, sheetId, req.user);
   }
 }

@@ -529,6 +529,14 @@ export const uploadApi = {
     });
     return handleResponse<import('@/types').AnswerSheet[]>(res);
   },
+
+  deleteSheet: async (examId: string, sheetId: string) => {
+    const res = await fetch(`${BASE_URL}/uploads/${examId}/${sheetId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return handleResponse<{ message: string }>(res);
+  },
 };
 
 export const evaluationApi = {

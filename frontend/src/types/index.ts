@@ -347,26 +347,46 @@ export interface SimilarityReport {
 export interface CLOAttainment {
   clo: string;
   attainmentPercent: number;
+  earnedMarks: number;
+  possibleMarks: number;
   studentsMet: number;
   totalStudents: number;
 }
 
-export interface QuestionDifficulty {
+export interface AnalyticsStudentQuestion {
   questionId: string;
+  questionNumber: number;
   questionText: string;
-  averageMark: number;
+  clo: string;
+  mark: number;
   maxMarks: number;
-  difficultyIndex: number;
+}
+
+export interface AnalyticsStudent {
+  resultId: string;
+  studentName: string;
+  rollNumber: string;
+  totalMarks: number;
+  maxMarks: number;
+  questions: AnalyticsStudentQuestion[];
+  cloScores: {
+    clo: string;
+    earnedMarks: number;
+    possibleMarks: number;
+    attainmentPercent: number;
+  }[];
 }
 
 export interface AnalyticsReport {
   examId: string;
   examTitle: string;
+  examTotalMarks: number;
   totalStudents: number;
   averageScore: number;
   highestScore: number;
   lowestScore: number;
+  passRate: number;
   cloAttainment: CLOAttainment[];
-  questionDifficulty: QuestionDifficulty[];
   scoreDistribution: { range: string; count: number }[];
+  students: AnalyticsStudent[];
 }

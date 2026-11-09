@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   BarChart3,
@@ -11,7 +11,6 @@ import {
   TrendingUp,
   Users,
   Award,
-  BookOpen,
   ChevronDown,
 } from 'lucide-react';
 import {
@@ -31,7 +30,6 @@ import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import { analyticsApi, examApi } from '@/lib/api';
 import type { AnalyticsReport, Exam } from '@/types';
-import { cn } from '@/lib/utils';
 
 function AnalyticsContent() {
   const router = useRouter();
@@ -42,6 +40,7 @@ function AnalyticsContent() {
     searchParams.get('examId') || ''
   );
   const [report, setReport] = useState<AnalyticsReport | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
@@ -61,21 +60,31 @@ function AnalyticsContent() {
 
   // Load all exams for the dropdown
   useEffect(() => {
-    examApi.getAll().then(setExams).catch(() => setExams([]));
+    examApi.getAll()
+      .then(setExams)
+      .catch((loadError: unknown) =>
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load exams.'),
+      );
   }, []);
 
   // Load analytics when exam selected
   useEffect(() => {
     if (!selectedExamId) {
       setReport(null);
+      setSelectedStudentId(null);
       return;
     }
     setLoading(true);
     setError('');
     analyticsApi
       .getReport(selectedExamId)
-      .then(setReport)
-      .catch(() => setError('Failed to load analytics data'))
+      .then((analyticsReport) => {
+        setReport(analyticsReport);
+        setSelectedStudentId(analyticsReport.students[0]?.resultId ?? null);
+      })
+      .catch((loadError: unknown) =>
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load analytics data.'),
+      )
       .finally(() => setLoading(false));
   }, [selectedExamId]);
 
@@ -84,32 +93,27 @@ function AnalyticsContent() {
     setExporting(true);
     try {
       await analyticsApi.exportCSV(selectedExamId);
-    } catch {
-      setError('Failed to export CSV');
+    } catch (exportError: unknown) {
+      setError(exportError instanceof Error ? exportError.message : 'Failed to export CSV.');
     } finally {
       setExporting(false);
     }
   };
 
-  const getCLOAttainmentColor = (percent: number) => {
-    if (percent >= 75) return 'bg-green-500';
-    if (percent >= 50) return 'bg-[#FAB963]';
-    return 'bg-red-500';
-  };
-
-  const getDifficultyColor = (difficulty: number) => {
-    if (difficulty < 0.3) return 'text-green-600';
-    if (difficulty < 0.7) return 'text-[#FAB963]';
-    return 'text-red-600';
-  };
-
-  const getDifficultyBg = (difficulty: number) => {
-    if (difficulty < 0.3) return 'bg-green-50 border-green-200';
-    if (difficulty < 0.7) return 'bg-yellow-50 border-yellow-200';
-    return 'bg-red-50 border-red-200';
-  };
-
   const selectedExam = exams.find((e) => e.id === selectedExamId);
+  const selectedStudent = useMemo(
+    () => report?.students.find((student) => student.resultId === selectedStudentId) ?? null,
+    [report, selectedStudentId],
+  );
+  const studentChartData = useMemo(
+    () =>
+      selectedStudent?.questions.map((question) => ({
+        question: `Q${question.questionNumber} · ${question.clo}`,
+        mark: question.mark,
+        maxMarks: question.maxMarks,
+      })) ?? [],
+    [selectedStudent],
+  );
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -239,7 +243,7 @@ function AnalyticsContent() {
                 </div>
                 <p className="text-xs text-[#888888] uppercase tracking-wide">Average Score</p>
                 <p className="text-2xl font-bold text-[#005461] mt-1">
-                  {report.averageScore.toFixed(1)}
+                  {report.averageScore.toFixed(1)} <span className="text-sm font-medium text-[#888888]">/ {report.examTotalMarks}</span>
                 </p>
               </div>
             </Card>
@@ -251,7 +255,7 @@ function AnalyticsContent() {
                 </div>
                 <p className="text-xs text-[#888888] uppercase tracking-wide">Highest Score</p>
                 <p className="text-2xl font-bold text-green-600 mt-1">
-                  {report.highestScore.toFixed(1)}
+                  {report.highestScore.toFixed(1)} <span className="text-sm font-medium text-[#888888]">/ {report.examTotalMarks}</span>
                 </p>
               </div>
             </Card>
@@ -263,11 +267,192 @@ function AnalyticsContent() {
                 </div>
                 <p className="text-xs text-[#888888] uppercase tracking-wide">Lowest Score</p>
                 <p className="text-2xl font-bold text-red-600 mt-1">
-                  {report.lowestScore.toFixed(1)}
+                  {report.lowestScore.toFixed(1)} <span className="text-sm font-medium text-[#888888]">/ {report.examTotalMarks}</span>
                 </p>
               </div>
             </Card>
           </div>
+
+          <Card>
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-[#1A1A1A] flex items-center gap-2">
+                <Users size={16} className="text-[#005461]" />
+                Student papers and total marks
+              </h3>
+              <p className="mt-1 text-xs text-[#777777]">
+                Select a student row to see their question-by-question attainment and CLO totals.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-[#E8DCC8] text-xs uppercase tracking-wide text-[#777777]">
+                    <th className="px-3 py-3 font-semibold">Roll number</th>
+                    <th className="px-3 py-3 font-semibold">Student</th>
+                    <th className="px-3 py-3 text-right font-semibold">Total marks</th>
+                    <th className="px-3 py-3 text-right font-semibold">Percentage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.students.map((student) => (
+                    <tr key={student.resultId} className="border-b border-[#F1EADF] last:border-0">
+                      <td colSpan={4} className="p-0">
+                        <button
+                          type="button"
+                          aria-pressed={selectedStudentId === student.resultId}
+                          onClick={() => setSelectedStudentId(student.resultId)}
+                          className={`grid w-full grid-cols-4 items-center text-left transition-colors ${
+                            selectedStudentId === student.resultId
+                              ? 'bg-[#EAF5F6]'
+                              : 'hover:bg-[#FFF8EB]'
+                          }`}
+                        >
+                          <span className="px-3 py-3 font-semibold text-[#005461]">{student.rollNumber || '—'}</span>
+                          <span className="px-3 py-3 text-[#333333]">{student.studentName}</span>
+                          <span className="px-3 py-3 text-right font-semibold text-[#1A1A1A]">
+                            {student.totalMarks} / {student.maxMarks}
+                          </span>
+                          <span className="px-3 py-3 text-right text-[#666666]">
+                            {student.maxMarks ? `${((student.totalMarks / student.maxMarks) * 100).toFixed(1)}%` : '—'}
+                          </span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {selectedStudent && (
+            <Card>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-[#1A1A1A]">
+                    {selectedStudent.studentName}
+                  </h3>
+                  <p className="mt-1 text-sm text-[#666666]">
+                    Roll number: <strong>{selectedStudent.rollNumber || 'Not recorded'}</strong>
+                  </p>
+                </div>
+                <p className="text-lg font-bold text-[#005461]">
+                  {selectedStudent.totalMarks} / {selectedStudent.maxMarks}
+                </p>
+              </div>
+
+              {studentChartData.length > 0 ? (
+                <div className="mt-5">
+                  <h4 className="text-sm font-semibold text-[#1A1A1A]">
+                    CLO attainment by question
+                  </h4>
+                  <p className="mt-1 text-xs text-[#777777]">
+                    Each point shows the awarded mark; the second line shows that question&apos;s maximum. CLOs are included on the question axis.
+                  </p>
+                  <div className="mt-3 h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={studentChartData} margin={{ top: 10, right: 20, left: 0, bottom: 45 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8DCC8" />
+                        <XAxis
+                          dataKey="question"
+                          angle={-30}
+                          textAnchor="end"
+                          interval={0}
+                          height={65}
+                          tick={{ fill: '#666666', fontSize: 11 }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          domain={[0, 'dataMax']}
+                          tick={{ fill: '#888888', fontSize: 12 }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip
+                          contentStyle={{ borderRadius: 10, border: '1px solid #E8DCC8', fontSize: 12 }}
+                          formatter={(value, name) => [`${value} marks`, name === 'Question maximum' ? 'Question maximum' : 'Student mark']}
+                        />
+                        <Line
+                          type="linear"
+                          dataKey="mark"
+                          name="Student mark"
+                          stroke="#005461"
+                          strokeWidth={3}
+                          dot={{ r: 5, fill: '#FFFFFF', stroke: '#005461', strokeWidth: 3 }}
+                          activeDot={{ r: 7, fill: '#FAB963', stroke: '#FFFFFF', strokeWidth: 2 }}
+                        />
+                        <Line
+                          type="linear"
+                          dataKey="maxMarks"
+                          name="Question maximum"
+                          stroke="#A3A3A3"
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          dot={{ r: 3, fill: '#A3A3A3' }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-[#777777]">No question-level marks are available for this paper.</p>
+              )}
+
+              <div className="mt-5">
+                <h4 className="text-sm font-semibold text-[#1A1A1A]">Question marks</h4>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-[#E8DCC8] text-xs uppercase tracking-wide text-[#777777]">
+                        <th className="px-3 py-2 font-semibold">Question</th>
+                        <th className="px-3 py-2 font-semibold">CLO</th>
+                        <th className="px-3 py-2 text-right font-semibold">Marks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedStudent.questions.map((question) => (
+                        <tr key={question.questionId} className="border-b border-[#F1EADF] last:border-0">
+                          <td className="px-3 py-2.5 text-[#1A1A1A]">
+                            Q{question.questionNumber}: {question.questionText}
+                          </td>
+                          <td className="px-3 py-2.5 text-[#666666]">{question.clo}</td>
+                          <td className="px-3 py-2.5 text-right font-semibold text-[#005461]">
+                            {question.mark} / {question.maxMarks}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <h4 className="text-sm font-semibold text-[#1A1A1A]">Marks by CLO</h4>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[420px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-[#E8DCC8] text-xs uppercase tracking-wide text-[#777777]">
+                        <th className="px-3 py-2 font-semibold">Learning outcome</th>
+                        <th className="px-3 py-2 text-right font-semibold">Marks</th>
+                        <th className="px-3 py-2 text-right font-semibold">Attainment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedStudent.cloScores.map((item) => (
+                        <tr key={item.clo} className="border-b border-[#F1EADF] last:border-0">
+                          <td className="px-3 py-2.5 font-medium text-[#1A1A1A]">{item.clo}</td>
+                          <td className="px-3 py-2.5 text-right font-semibold text-[#005461]">
+                            {item.earnedMarks} / {item.possibleMarks}
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-[#666666]">{item.attainmentPercent}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Score Distribution */}
           {report.scoreDistribution && report.scoreDistribution.length > 0 && (
@@ -343,78 +528,32 @@ function AnalyticsContent() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-            </Card>
-          )}
-
-          {/* Question Difficulty Index */}
-          {report.questionDifficulty && report.questionDifficulty.length > 0 && (
-            <Card>
-              <h3 className="text-sm font-semibold text-[#1A1A1A] mb-4 flex items-center gap-2">
-                <BookOpen size={16} className="text-[#005461]" />
-                Question Difficulty Index
-              </h3>
-              <div className="h-[280px] w-full mb-5">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={report.questionDifficulty.map((question, index) => ({
-                      question: `Q${index + 1}`,
-                      attained: Math.round(question.difficultyIndex * 100),
-                    }))}
-                    margin={{ top: 10, right: 20, left: -20, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8DCC8" />
-                    <XAxis dataKey="question" tick={{ fill: '#888888', fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fill: '#888888', fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      cursor={{ stroke: '#E8DCC8' }}
-                      contentStyle={{ borderRadius: 10, border: '1px solid #E8DCC8', fontSize: 12 }}
-                      formatter={(value) => [`${value}%`, 'Average attainment']}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="attained"
-                      stroke="#005461"
-                      strokeWidth={3}
-                      dot={{ r: 5, fill: '#FFFFFF', stroke: '#005461', strokeWidth: 3 }}
-                      activeDot={{ r: 7, fill: '#FAB963', stroke: '#FFFFFF', strokeWidth: 2 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="space-y-2">
-                {report.questionDifficulty.map((q, idx) => (
-                  <Card
-                    key={q.questionId}
-                    padding="sm"
-                    className={cn('border', getDifficultyBg(q.difficultyIndex))}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 mr-4">
-                        <p className="text-sm font-medium text-[#1A1A1A]">
-                          Q{idx + 1}:{' '}
-                          {q.questionText.length > 80
-                            ? q.questionText.substring(0, 80) + '...'
-                            : q.questionText}
-                        </p>
-                        <p className="text-xs text-[#888888] mt-1">
-                          Avg Score: {q.averageMark.toFixed(1)} / {q.maxMarks}
-                        </p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className={cn('text-sm font-bold', getDifficultyColor(q.difficultyIndex))}>
-                          {(q.difficultyIndex * 100).toFixed(0)}%
-                        </p>
-                        <p className="text-xs text-[#888888]">
-                          {q.difficultyIndex < 0.3
-                            ? 'Easy'
-                            : q.difficultyIndex < 0.7
-                            ? 'Medium'
-                            : 'Hard'}
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
+              <div className="mt-5 overflow-x-auto">
+                <h4 className="text-sm font-semibold text-[#1A1A1A]">Class marks by CLO</h4>
+                <table className="mt-2 w-full min-w-[560px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-[#E8DCC8] text-xs uppercase tracking-wide text-[#777777]">
+                      <th className="px-3 py-2 font-semibold">Learning outcome</th>
+                      <th className="px-3 py-2 text-right font-semibold">Class marks</th>
+                      <th className="px-3 py-2 text-right font-semibold">Attainment</th>
+                      <th className="px-3 py-2 text-right font-semibold">Students ≥50%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.cloAttainment.map((clo) => (
+                      <tr key={clo.clo} className="border-b border-[#F1EADF] last:border-0">
+                        <td className="px-3 py-2.5 font-medium text-[#1A1A1A]">{clo.clo}</td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-[#005461]">
+                          {clo.earnedMarks} / {clo.possibleMarks}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-[#666666]">{clo.attainmentPercent}%</td>
+                        <td className="px-3 py-2.5 text-right text-[#666666]">
+                          {clo.studentsMet} / {clo.totalStudents}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </Card>
           )}
@@ -428,34 +567,16 @@ function AnalyticsContent() {
                   Pass Rate (≥50%)
                 </p>
                 <p className="text-lg font-bold text-[#005461] mt-1">
-                  {report.totalStudents > 0
-                    ? Math.round(
-                        (report.scoreDistribution
-                          .filter((s) => {
-                            const min = parseInt(s.range.split('-')[0]);
-                            return min >= 50;
-                          })
-                          .reduce((acc, s) => acc + s.count, 0) /
-                          report.totalStudents) *
-                          100
-                      )
-                    : 0}
+                  {report.passRate}
                   %
                 </p>
               </div>
               <div>
                 <p className="text-xs text-[#888888] uppercase tracking-wide">
-                  Avg Difficulty
+                  Average total
                 </p>
                 <p className="text-lg font-bold text-[#005461] mt-1">
-                  {report.questionDifficulty.length > 0
-                    ? (
-                        report.questionDifficulty.reduce(
-                          (acc, q) => acc + q.difficultyIndex,
-                          0
-                        ) / report.questionDifficulty.length
-                      ).toFixed(2)
-                    : 'N/A'}
+                  {report.averageScore.toFixed(1)} / {report.examTotalMarks}
                 </p>
               </div>
               <div>

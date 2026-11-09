@@ -12,6 +12,7 @@ import {
   Loader,
   X,
   ChevronDown,
+  Trash2,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -72,6 +73,7 @@ function UploadSheetsContent() {
   const [evaluating, setEvaluating] = useState(false);
   const [error, setError] = useState('');
   const [successCount, setSuccessCount] = useState(0);
+  const [deletingSheetId, setDeletingSheetId] = useState<string | null>(null);
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -182,6 +184,24 @@ function UploadSheetsContent() {
       );
     } finally {
       setEvaluating(false);
+    }
+  };
+
+  const handleDeleteSheet = async (sheet: AnswerSheet) => {
+    const confirmed = window.confirm(
+      `Delete the answer sheet for ${sheet.registrationNo || sheet.studentName}? This also removes its evaluation and any published result.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingSheetId(sheet.id);
+    setError('');
+    try {
+      await uploadApi.deleteSheet(selectedExamId, sheet.id);
+      setSheets((current) => current.filter((item) => item.id !== sheet.id));
+    } catch (deleteError: unknown) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete this answer sheet.');
+    } finally {
+      setDeletingSheetId(null);
     }
   };
 
@@ -337,7 +357,7 @@ function UploadSheetsContent() {
       {/* Sheets list */}
       {selectedExamId && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-[#1A1A1A]">
               Uploaded Sheets{' '}
               <span className="text-[#888888] font-normal">
@@ -420,6 +440,16 @@ function UploadSheetsContent() {
                             {config.label}
                           </span>
                         </Badge>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          loading={deletingSheetId === sheet.id}
+                          disabled={sheet.status === 'processing' || deletingSheetId !== null}
+                          onClick={() => handleDeleteSheet(sheet)}
+                        >
+                          <Trash2 size={14} className="mr-1.5" />
+                          Delete
+                        </Button>
                       </div>
                     </div>
 
