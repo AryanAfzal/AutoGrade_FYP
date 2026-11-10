@@ -51,7 +51,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -107,19 +106,19 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FFF8EB] flex">
-      <div className="relative hidden lg:flex lg:w-1/2 min-h-screen overflow-hidden bg-[#003D47] flex-col justify-between p-12">
+    <div className="login-page relative min-h-screen flex">
+      <div className="login-brand-panel relative hidden lg:flex lg:w-1/2 min-h-screen overflow-hidden bg-[#003D47] flex-col justify-between p-12">
         <img
           src="/assets/african-female-teacher-checking-answer-sheet-after-exam-top-view-workplace-school-and-college-education-concept-vector-illustration-in-flat-cartoon-2RPAB4R.jpg"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-center opacity-25"
+          className="login-brand-image absolute inset-0 h-full w-full object-cover object-center opacity-25"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#003D47]/75 via-[#005461]/40 to-[#003D47]/95" />
+        <div className="login-brand-overlay absolute inset-0 bg-gradient-to-b from-[#003D47]/75 via-[#005461]/40 to-[#003D47]/95" />
 
         <div className="relative z-10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#FAB963] rounded-lg flex items-center justify-center">
+            <div className="login-brand-mark w-10 h-10 bg-[#FAB963] rounded-lg flex items-center justify-center">
               <BookOpen size={20} className="text-[#1A1A1A]" />
             </div>
             <span className="text-white text-xl font-semibold">AutoGrade</span>
@@ -156,13 +155,13 @@ export default function LoginPage() {
         </p>
       </div>
 
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
-        <div className="w-full max-w-md space-y-6">
-          <div className="flex lg:hidden items-center gap-3 mb-4">
+      <div className="login-form-panel relative w-full lg:w-1/2 flex items-center justify-center p-8">
+        <div className="login-content w-full max-w-md space-y-6">
+          <div className="login-mobile-brand flex lg:hidden items-center gap-3 mb-4 pr-24">
             <div className="w-9 h-9 bg-[#005461] rounded-lg flex items-center justify-center">
               <BookOpen size={18} className="text-[#FAB963]" />
             </div>
-            <span className="text-[#005461] text-lg font-semibold">AutoGrade</span>
+            <span className="login-mobile-brand-name text-[#005461] text-lg font-semibold">AutoGrade</span>
             <Link href="/" className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#005461]">
               <ArrowLeft size={14} />
               Website
@@ -170,8 +169,8 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1">
-            <h2 className="text-2xl font-bold text-[#1A1A1A]">Welcome back</h2>
-            <p className="text-sm text-[#888888]">Select your role and sign in to continue</p>
+            <h2 className="login-title text-2xl font-bold text-[#1A1A1A]">Welcome back</h2>
+            <p className="login-subtitle text-sm text-[#888888]">Select your role and sign in to continue</p>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
@@ -183,16 +182,16 @@ export default function LoginPage() {
                   setSelectedRole(role);
                   setError('');
                 }}
-                className={`relative flex flex-col items-center gap-2 p-3 rounded-xl border-2 text-center transition-all duration-200 ${
+                className={`login-role-card relative flex flex-col items-center gap-2 p-3 rounded-xl border-2 text-center transition-all duration-200 ${
                   selectedRole === role
-                    ? 'border-[#005461] bg-[#005461] text-white shadow-md'
+                    ? 'selected border-[#005461] bg-[#005461] text-white shadow-md'
                     : 'border-[#E8DCC8] bg-white text-[#4A4A4A] hover:border-[#005461] cursor-pointer'
                 }`}
               >
                 <span className={selectedRole === role ? 'text-[#FAB963]' : ''}>{icon}</span>
                 <span className="text-xs font-medium">{label}</span>
                 <span
-                  className={`text-[10px] leading-tight hidden sm:block ${
+                  className={`login-role-description text-[10px] leading-tight hidden sm:block ${
                     selectedRole === role ? 'text-[#C8E6EA]' : 'text-[#888888]'
                   }`}
                 >
@@ -203,7 +202,7 @@ export default function LoginPage() {
           </div>
 
           {selectedRole === 'admin' && (
-            <div className="rounded-xl border border-[#E8DCC8] bg-white px-4 py-3 text-xs text-[#555555]">
+            <div className="login-admin-notice rounded-xl border border-[#E8DCC8] bg-white px-4 py-3 text-xs text-[#555555]">
               <p className="font-semibold text-[#005461]">Predefined Administrator Accounts</p>
               <p className="mt-0.5">
                 Authorized emails: <code className="font-mono">admin1@cuiwah.edu.pk</code>,{' '}
@@ -216,7 +215,7 @@ export default function LoginPage() {
           {notice && (
             <div
               role="status"
-              className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+              className="login-success-notice flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
             >
               <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-600" />
               <span>{notice}</span>
@@ -253,7 +252,7 @@ export default function LoginPage() {
             />
 
             <div className="flex items-center justify-between text-xs pt-0.5">
-              <label className="flex items-center gap-2 cursor-pointer select-none text-[#4A4A4A]">
+              <label className="login-remember-label flex items-center gap-2 cursor-pointer select-none text-[#4A4A4A]">
                 <input
                   type="checkbox"
                   checked={rememberMe}
@@ -265,7 +264,7 @@ export default function LoginPage() {
 
               <Link
                 href="/forgot-password"
-                className="font-semibold text-[#005461] hover:underline"
+                className="login-forgot-link font-semibold text-[#005461] hover:underline"
               >
                 Forgot password?
               </Link>
@@ -280,7 +279,7 @@ export default function LoginPage() {
               </div>
             )}
 
-            <Button type="submit" size="lg" loading={loading} className="w-full">
+            <Button type="submit" size="lg" loading={loading} className="login-submit-button w-full">
               Sign in as {roles.find((r) => r.role === selectedRole)?.label}
             </Button>
           </form>
@@ -292,7 +291,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => router.push('/register/teacher')}
-                  className="text-[#005461] font-semibold hover:underline"
+                  className="login-register-link text-[#005461] font-semibold hover:underline"
                 >
                   Create teacher account
                 </button>
@@ -303,7 +302,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => router.push('/register/student')}
-                  className="text-[#005461] font-semibold hover:underline"
+                  className="login-register-link text-[#005461] font-semibold hover:underline"
                 >
                   Create student account
                 </button>
@@ -313,7 +312,7 @@ export default function LoginPage() {
             )}
           </div>
 
-          <p className="text-center text-xs text-[#888888]">
+          <p className="login-footer text-center text-xs text-[#888888]">
             AutoGrade — FYP Project · COMSATS Wah · <span className="text-[#005461] font-medium">2023–2026</span>
           </p>
         </div>

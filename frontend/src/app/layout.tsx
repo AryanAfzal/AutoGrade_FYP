@@ -5,6 +5,7 @@ import '@fontsource/manrope/600.css';
 import '@fontsource/manrope/700.css';
 import '@fontsource/manrope/800.css';
 import './globals.css';
+import ThemeToggle from '@/components/layout/ThemeToggle';
 
 export const metadata: Metadata = {
   title: 'AutoGrade',
@@ -18,7 +19,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen overflow-x-hidden">{children}</body>
+      <body className="min-h-screen overflow-x-hidden">
+        {children}
+        <ThemeToggle />
+      </body>
     </html>
   );
 }

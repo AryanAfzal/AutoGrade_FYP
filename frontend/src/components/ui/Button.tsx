@@ -41,6 +41,7 @@ export default function Button({
   return (
     <button
       className={cn(base, variants[variant], sizes[size], className)}
+      data-autograde-variant={variant}
       disabled={disabled || loading}
       {...props}
     >
