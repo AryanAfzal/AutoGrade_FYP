@@ -13,12 +13,14 @@ import {
   X,
   ChevronDown,
   Trash2,
+  Cloud,
+  Cpu,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import { examApi, uploadApi, evaluationApi } from '@/lib/api';
-import type { Exam, AnswerSheet, SheetStatus } from '@/types';
+import type { Exam, AnswerSheet, SheetStatus, OcrEngine } from '@/types';
 import { cn, formatDate } from '@/lib/utils';
 
 const statusConfig: Record<
@@ -88,6 +90,7 @@ function UploadSheetsContent() {
   const [error, setError] = useState('');
   const [successCount, setSuccessCount] = useState(0);
   const [deletingSheetId, setDeletingSheetId] = useState<string | null>(null);
+  const [ocrEngine, setOcrEngine] = useState<OcrEngine>('trocr');
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -199,7 +202,8 @@ function UploadSheetsContent() {
     try {
       const uploaded = await uploadApi.uploadSheets(
         selectedExamId,
-        fileArray
+        fileArray,
+        ocrEngine
       );
       setSheets((prev) => [...uploaded, ...prev]);
       if (uploaded[0]) setSelectedSheetId(uploaded[0].id);
@@ -231,7 +235,7 @@ function UploadSheetsContent() {
 
     try {
       // Trigger evaluation (this will process all uploaded sheets)
-      const evaluation = await evaluationApi.triggerEvaluation(selectedExamId);
+      const evaluation = await evaluationApi.triggerEvaluation(selectedExamId, ocrEngine);
       
       // Refresh sheets to show updated status
       const updated = await uploadApi.getSheets(selectedExamId);
@@ -344,9 +348,90 @@ function UploadSheetsContent() {
       <Card>
         <div className="grid gap-5 lg:grid-cols-2">
           <section>
-            <h3 className="text-sm font-semibold text-[#005461] mb-4 uppercase tracking-wide">
-              Upload Answer Sheets
-            </h3>
+            <div className="mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                <h3 className="text-sm font-semibold text-[#005461] uppercase tracking-wide">
+                  Upload Answer Sheets
+                </h3>
+                <span className="text-[11px] font-medium text-[#777777]">
+                  Select OCR engine
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setOcrEngine('pen_to_print')}
+                  aria-pressed={ocrEngine === 'pen_to_print'}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
+                    ocrEngine === 'pen_to_print'
+                      ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
+                      : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+                      ocrEngine === 'pen_to_print'
+                        ? 'bg-[#FAB963] text-[#1A1A1A]'
+                        : 'bg-[#E4F2F4] text-[#005461]'
+                    )}
+                  >
+                    <Cloud size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold leading-tight truncate">
+                      Perform OCR via API
+                    </p>
+                    <p
+                      className={cn(
+                        'text-[10px] leading-tight truncate mt-0.5',
+                        ocrEngine === 'pen_to_print' ? 'text-[#C8E6EA]' : 'text-[#888888]'
+                      )}
+                    >
+                      Pen to Print Cloud OCR
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOcrEngine('trocr')}
+                  aria-pressed={ocrEngine === 'trocr'}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
+                    ocrEngine === 'trocr'
+                      ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
+                      : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+                      ocrEngine === 'trocr'
+                        ? 'bg-[#FAB963] text-[#1A1A1A]'
+                        : 'bg-[#E4F2F4] text-[#005461]'
+                    )}
+                  >
+                    <Cpu size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold leading-tight truncate">
+                      TrOCR Base Model
+                    </p>
+                    <p
+                      className={cn(
+                        'text-[10px] leading-tight truncate mt-0.5',
+                        ocrEngine === 'trocr' ? 'text-[#C8E6EA]' : 'text-[#888888]'
+                      )}
+                    >
+                      PaddleOCR + Local TrOCR
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
             <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -570,7 +655,10 @@ function UploadSheetsContent() {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <Badge variant={sheet.ocrEngine === 'pen_to_print' ? 'info' : 'default'}>
+                          {sheet.ocrEngine === 'pen_to_print' ? 'Pen to Print API' : 'TrOCR Model'}
+                        </Badge>
                         <Badge variant={config.variant}>
                           <span className="flex items-center gap-1">
                             {config.icon}

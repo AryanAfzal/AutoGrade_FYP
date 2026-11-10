@@ -250,12 +250,15 @@ export type SheetStatus =
   | 'awaiting_approval'
   | 'approved';
 
+export type OcrEngine = 'trocr' | 'pen_to_print';
+
 export interface AnswerSheet {
   id: string;
   examId: string;
   studentName: string;
   registrationNo: string;
   filePath: string;
+  ocrEngine?: OcrEngine;
   status: SheetStatus;
   uploadedAt: string;
 }

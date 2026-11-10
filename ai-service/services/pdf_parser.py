@@ -3,7 +3,7 @@ import os
 import re
 import tempfile
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 import pdfplumber
 
@@ -450,11 +450,150 @@ def _match_question_prompt(
     return matches[0][1]
 
 
-def extract_answers_from_sheet(
+
+def _extract_answers_with_pen_to_print(
     file_path: str,
     expected_question_count: Optional[int] = None,
     expected_question_texts: Optional[list[str]] = None,
 ) -> list[dict]:
+    """
+    Pen to Print API handwriting pipeline:
+    1. Render each PDF page and recognize handwritten text via Pen to Print API.
+    2. Split recognized lines into structured Q1, Q2, Q3... answer blocks.
+    """
+    from services.pen_to_print_ocr import extract_lines_from_pdf_via_pen_to_print
+    from services.text_cleaner import infer_sequential_number, is_watermark_or_noise, parse_header_line
+
+    document_header = re.compile(
+        r"^(?:student\s*name|name|reg(?:istration)?\s*(?:no|number|#)|roll\s*(?:no|number)|course|subject|date)\s*(?:[:.\-]|(?=\s+(?:SP|FA)\s*\d))",
+        re.IGNORECASE,
+    )
+    answer_marker = re.compile(r"^(?:answer|ans)\s*[:.\-]\s*", re.IGNORECASE)
+    explicit_q_re = re.compile(
+        r"^\s*(?:q(?:uestion)?\s*(?:no\.?)?\s*#?\s*0?(\d{1,2})\b\s*[:.)\-]?|o\s*(?:no\.?)?\s*#?\s*0?(\d{1,2})\s*[:.)\-])\s*(.*)$",
+        re.IGNORECASE,
+    )
+    inline_split_re = re.compile(
+        r"(?<!^)\s+(?=(?:q(?:uestion)?\s*(?:no\.?)?\s*#\s*0?\d{1,2}|q\s*no\.?\s*0?\d{1,2}|q\s*#?\s*0?\d{1,2}\s*[:.)\-]))",
+        re.IGNORECASE,
+    )
+    numbered_q_re = re.compile(r"^\s*0?(\d{1,2})\s*([:.)\-])\s*(.*)$")
+
+    raw_items = extract_lines_from_pdf_via_pen_to_print(file_path)
+    if not raw_items:
+        return []
+
+    upper_bound = expected_question_count or 99
+    groups: dict[int, list[str]] = {}
+    current_question: Optional[int] = None
+
+    expanded_lines: list[str] = []
+    for item in raw_items:
+        raw_t = (item.get("text") or "").strip()
+        if not raw_t:
+            continue
+        for part in inline_split_re.split(raw_t):
+            p = part.strip()
+            if p:
+                expanded_lines.append(p)
+
+    for text in expanded_lines:
+        if not text:
+            continue
+        if document_header.match(text):
+            continue
+        if is_watermark_or_noise(text):
+            continue
+
+        # 1. Check if line matches an unnumbered question prompt from the exam
+        prompt_num = _match_question_prompt(text, expected_question_texts)
+        if prompt_num is not None:
+            if prompt_num != current_question:
+                current_question = prompt_num
+                groups.setdefault(current_question, [])
+            continue
+
+        # 2. Check explicit Q1 / Question 1 / Q#01 header
+        m_explicit = explicit_q_re.match(text)
+        if m_explicit:
+            q_num = int(m_explicit.group(1) or m_explicit.group(2))
+            if 1 <= q_num <= upper_bound:
+                current_question = q_num
+                groups.setdefault(current_question, [])
+                remainder = answer_marker.sub("", m_explicit.group(3).strip()).strip()
+                if remainder:
+                    groups[current_question].append(remainder)
+                continue
+
+        # 3. Check OCR header patterns (e.g. Q#01:, Qno 1:)
+        is_ocr_h, detected_num, rest = parse_header_line(text)
+        if is_ocr_h:
+            expected_next = (current_question or 0) + 1
+            q_num = infer_sequential_number(detected_num, expected_next)
+            if 1 <= q_num <= upper_bound:
+                current_question = q_num
+                groups.setdefault(current_question, [])
+                remainder = answer_marker.sub("", rest.strip()).strip()
+                if remainder:
+                    groups[current_question].append(remainder)
+                continue
+
+        # 4. Check sequential bare numbered headers like "1." / "2)"
+        m_num = numbered_q_re.match(text)
+        if m_num:
+            q_num = int(m_num.group(1))
+            is_seq = (current_question is None and q_num == 1) or (
+                current_question is not None and q_num == current_question + 1
+            )
+            if is_seq and 1 <= q_num <= upper_bound:
+                current_question = q_num
+                groups.setdefault(current_question, [])
+                remainder = answer_marker.sub("", m_num.group(3).strip()).strip()
+                if remainder:
+                    groups[current_question].append(remainder)
+                continue
+
+        # 5. Regular answer line
+        cleaned_line = answer_marker.sub("", text).strip()
+        if not cleaned_line:
+            continue
+        if current_question is None:
+            current_question = 1
+        groups.setdefault(current_question, []).append(cleaned_line)
+
+    structured_answers = []
+    for q_num in sorted(groups.keys()):
+        answer_text = " ".join(groups[q_num]).strip()
+        if answer_text:
+            structured_answers.append(
+                {"questionNumber": q_num, "answerText": answer_text}
+            )
+
+    print(
+        f"[pdf_parser] Pen to Print structured {len(structured_answers)} answer(s) "
+        f"from {len(raw_items)} line(s)."
+    )
+    return structured_answers
+
+
+def extract_answers_from_sheet(
+    file_path: str,
+    expected_question_count: Optional[int] = None,
+    expected_question_texts: Optional[list[str]] = None,
+    ocr_engine: Literal["trocr", "pen_to_print"] = "trocr",
+) -> list[dict]:
+    if ocr_engine == "pen_to_print":
+        try:
+            return _extract_answers_with_pen_to_print(
+                file_path,
+                expected_question_count=expected_question_count,
+                expected_question_texts=expected_question_texts,
+            )
+        except Exception as error:
+            raise RuntimeError(
+                f"Pen to Print OCR failed for {file_path}: {error}"
+            ) from error
+
     try:
         with pdfplumber.open(file_path) as pdf:
             full_text = "\n".join(

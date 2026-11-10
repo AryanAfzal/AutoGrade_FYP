@@ -21,8 +21,12 @@ export class EvaluationController {
   constructor(private evaluationService: EvaluationService) {}
 
   @Post(':examId/trigger')
-  triggerEvaluation(@Param('examId') examId: string, @Request() req) {
-    return this.evaluationService.triggerEvaluation(examId, req.user);
+  triggerEvaluation(
+    @Param('examId') examId: string,
+    @Request() req,
+    @Body('ocrEngine') ocrEngine?: string,
+  ) {
+    return this.evaluationService.triggerEvaluation(examId, req.user, ocrEngine);
   }
 
   @Get(':examId')

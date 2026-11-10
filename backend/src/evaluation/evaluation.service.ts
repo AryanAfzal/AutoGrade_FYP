@@ -50,7 +50,10 @@ export class EvaluationService {
   ) {}
 
   async getResults(examId: string, user: User) {
-    await this.getOwnedExam(examId, user);
+    const exam = await this.getOwnedExam(examId, user);
+    const questionOrder = new Map(
+      (exam.questions || []).map((q, index) => [q.id, index]),
+    );
     const results = await this.resultRepo.find({
       where: { answerSheet: { exam: { id: examId } } },
       relations: [
@@ -72,7 +75,13 @@ export class EvaluationService {
       totalApprovedMark: result.totalApprovedMark,
       reviewCompletedAt: result.reviewCompletedAt,
       status: result.status,
-      entries: result.entries.map((entry) => ({
+      entries: [...result.entries]
+        .sort(
+          (a, b) =>
+            (questionOrder.get(a.questionId) ?? Number.MAX_SAFE_INTEGER) -
+            (questionOrder.get(b.questionId) ?? Number.MAX_SAFE_INTEGER),
+        )
+        .map((entry) => ({
         ...entry,
         reviewAuditTrail: (entry.reviewAuditTrail || [])
           .sort(
@@ -409,6 +418,7 @@ export class EvaluationService {
   async triggerEvaluation(
     examId: string,
     user: User,
+    ocrEngine?: string,
   ): Promise<EvaluationJobStartResult> {
     await this.getOwnedExam(examId, user);
     if (this.activeEvaluations.has(examId)) {
@@ -427,6 +437,13 @@ export class EvaluationService {
       });
       if (!exam) {
         throw new Error(`Exam ${examId} not found`);
+      }
+      if (exam.questions?.length) {
+        exam.questions.sort(
+          (a, b) =>
+            (a.orderIndex ?? Number.MAX_SAFE_INTEGER) -
+            (b.orderIndex ?? Number.MAX_SAFE_INTEGER),
+        );
       }
 
       const candidates = await this.sheetRepo.find({
@@ -480,7 +497,7 @@ export class EvaluationService {
       this.logger.log(
         `Started evaluation for exam ${examId}: ${availableSheets.length} sheet(s).`,
       );
-      void this.processEvaluationSheets(exam, availableSheets)
+      void this.processEvaluationSheets(exam, availableSheets, ocrEngine)
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
           this.logger.error(
@@ -500,10 +517,23 @@ export class EvaluationService {
     }
   }
 
-  private async processEvaluationSheets(exam: Exam, sheets: AnswerSheet[]) {
+  private async processEvaluationSheets(
+    exam: Exam,
+    sheets: AnswerSheet[],
+    fallbackOcrEngine?: string,
+  ) {
     for (const sheet of sheets) {
       const startedAt = Date.now();
       try {
+        const resolvedEngine: 'trocr' | 'pen_to_print' =
+          sheet.ocrEngine === 'pen_to_print'
+            ? 'pen_to_print'
+            : sheet.ocrEngine === 'trocr'
+              ? 'trocr'
+              : fallbackOcrEngine === 'pen_to_print'
+                ? 'pen_to_print'
+                : 'trocr';
+
         const aiResponse = await axios.post(
           `${process.env.AI_SERVICE_URL}/evaluate`,
           {
@@ -511,6 +541,7 @@ export class EvaluationService {
             filePath: sheet.filePath,
             examId: exam.id,
             questions: exam.questions,
+            ocrEngine: resolvedEngine,
           },
           { timeout: 300000 },
         );
@@ -882,6 +913,13 @@ export class EvaluationService {
     });
     if (!exam) {
       throw new NotFoundException('Exam not found.');
+    }
+    if (exam.questions?.length) {
+      exam.questions.sort(
+        (a, b) =>
+          (a.orderIndex ?? Number.MAX_SAFE_INTEGER) -
+          (b.orderIndex ?? Number.MAX_SAFE_INTEGER),
+      );
     }
     return exam;
   }

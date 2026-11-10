@@ -18,6 +18,9 @@ export class AnswerSheet {
   @Column()
   filePath: string;
 
+  @Column({ default: 'trocr' })
+  ocrEngine: 'trocr' | 'pen_to_print';
+
   @Column({ default: 'uploaded' })
   status: 'uploaded' | 'processing' | 'awaiting_approval' | 'approved' | 'flagged' | 'mapped';
 

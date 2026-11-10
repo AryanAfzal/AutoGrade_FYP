@@ -9,6 +9,9 @@ export class Question {
   @ManyToOne(() => Exam, (e) => e.questions, { onDelete: 'CASCADE' })
   exam: Exam;
 
+  @Column({ type: 'int', nullable: true })
+  orderIndex: number | null;
+
   @Column()
   type: 'mcq' | 'descriptive';
 
