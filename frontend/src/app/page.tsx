@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import {
   ArrowRight,
@@ -25,31 +26,37 @@ import { getStoredUser, getToken } from '@/lib/api';
 
 const features = [
   {
+    image: '/assets/features/feature-handwriting.jpg',
     icon: ScanText,
     title: 'Handwritten Recognition',
     description: 'Extract answers from scanned PDFs and handwritten submissions with confidence scoring.',
   },
   {
+    image: '/assets/features/feature-semantic.jpg',
     icon: BrainCircuit,
     title: 'Semantic Evaluation',
     description: 'Compare meaning—not just exact words—with AI-assisted answer matching.',
   },
   {
+    image: '/assets/features/feature-bulk-upload.jpg',
     icon: UploadCloud,
     title: 'Simple Bulk Uploads',
     description: 'Upload answer keys and multiple student sheets from one organized workspace.',
   },
   {
+    image: '/assets/features/feature-ai-review.jpg',
     icon: ClipboardCheck,
     title: 'AI-Assisted Review',
     description: 'Review generated scores, adjust feedback, and publish results when ready.',
   },
   {
+    image: '/assets/features/feature-analytics.jpg',
     icon: BarChart3,
     title: 'Performance Analytics',
     description: 'Understand class performance, difficult questions, and CLO attainment.',
   },
   {
+    image: '/assets/features/feature-role-access.jpg',
     icon: ShieldCheck,
     title: 'Role-Based Access',
     description: 'Separate secure workflows for administrators, teachers, and students.',
@@ -59,18 +66,21 @@ const features = [
 const steps = [
   {
     number: '01',
+    image: '/assets/steps/step-01-upload.jpg',
     icon: UploadCloud,
     title: 'Upload your documents',
     description: 'Add the answer key and student answer sheets as PDF files.',
   },
   {
     number: '02',
+    image: '/assets/steps/step-02-ai-evaluate.jpg',
     icon: BrainCircuit,
     title: 'Let AI evaluate',
     description: 'Answers are extracted and matched against the expected solution.',
   },
   {
     number: '03',
+    image: '/assets/steps/step-03-publish.jpg',
     icon: BarChart3,
     title: 'Review and publish',
     description: 'Inspect scores, add feedback, and share results with students.',
@@ -80,6 +90,16 @@ const steps = [
 export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dashboardLink, setDashboardLink] = useState('/login');
+
+  const handleNavScroll = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault();
+    setMenuOpen(false);
+    const target = document.getElementById(id);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth' });
+      window.history.pushState(null, '', `#${id}`);
+    }
+  };
 
   useEffect(() => {
     const token = getToken();
@@ -99,17 +119,22 @@ export default function Home() {
       <header className="landing-nav-wrap">
         <nav className="landing-nav" aria-label="Main navigation">
           <Link href="/" className="brand" aria-label="AutoGrade home">
-            <span className="brand-mark">
-              <GraduationCap size={22} strokeWidth={2.2} />
-            </span>
+            <Image
+              src="/favicon-round.png"
+              alt="AutoGrade Logo"
+              width={38}
+              height={38}
+              className="w-[38px] h-[38px] object-contain rounded-full shadow-sm"
+              priority
+            />
             <span>AutoGrade</span>
           </Link>
 
           <div className="nav-links">
-            <Link href="#features">Features</Link>
-            <Link href="#how-it-works">How it works</Link>
-            <Link href="#benefits">Benefits</Link>
-            <Link href="#security">Security</Link>
+            <a href="#features" onClick={(e) => handleNavScroll(e, 'features')}>Features</a>
+            <a href="#how-it-works" onClick={(e) => handleNavScroll(e, 'how-it-works')}>How it works</a>
+            <a href="#benefits" onClick={(e) => handleNavScroll(e, 'benefits')}>Benefits</a>
+            <a href="#security" onClick={(e) => handleNavScroll(e, 'security')}>Security</a>
           </div>
 
           <div className="nav-actions">
@@ -134,10 +159,10 @@ export default function Home() {
 
         {menuOpen && (
           <div className="mobile-menu">
-            <Link href="#features" onClick={() => setMenuOpen(false)}>Features</Link>
-            <Link href="#how-it-works" onClick={() => setMenuOpen(false)}>How it works</Link>
-            <Link href="#benefits" onClick={() => setMenuOpen(false)}>Benefits</Link>
-            <Link href="#security" onClick={() => setMenuOpen(false)}>Security</Link>
+            <a href="#features" onClick={(e) => handleNavScroll(e, 'features')}>Features</a>
+            <a href="#how-it-works" onClick={(e) => handleNavScroll(e, 'how-it-works')}>How it works</a>
+            <a href="#benefits" onClick={(e) => handleNavScroll(e, 'benefits')}>Benefits</a>
+            <a href="#security" onClick={(e) => handleNavScroll(e, 'security')}>Security</a>
             <Link href="/login" onClick={() => setMenuOpen(false)}>Log in</Link>
             <Link href="/register/teacher" className="mobile-cta" onClick={() => setMenuOpen(false)}>
               Get started
@@ -149,11 +174,7 @@ export default function Home() {
       <section className="hero-section">
         <div className="hero-grid">
           <div className="hero-copy">
-            <div className="eyebrow reveal-one">
-              <Sparkles size={15} />
-              AI-powered examination evaluation
-            </div>
-            <h1 className="reveal-two">
+            <h1 className="reveal-one">
               Grade exams faster.
               <br />
               <span>Teach with confidence.</span>
@@ -166,10 +187,10 @@ export default function Home() {
               <Link href="/register/teacher" className="primary-button">
                 Start evaluating <ArrowRight size={18} />
               </Link>
-              <Link href="#how-it-works" className="secondary-button">
+              <a href="#how-it-works" onClick={(e) => handleNavScroll(e, 'how-it-works')} className="secondary-button">
                 <span className="play-icon"><Play size={14} fill="currentColor" /></span>
                 See how it works
-              </Link>
+              </a>
             </div>
             <div className="hero-proof reveal-four">
               <div className="proof-avatars" aria-hidden="true">
@@ -198,7 +219,15 @@ export default function Home() {
               </div>
               <div className="dashboard-body">
                 <aside className="mock-sidebar">
-                  <div className="mock-logo"><GraduationCap size={16} /></div>
+                  <div className="mock-logo !bg-transparent !shadow-none">
+                    <Image
+                      src="/favicon-round.png"
+                      alt="AutoGrade Logo"
+                      width={28}
+                      height={28}
+                      className="w-7 h-7 object-contain rounded-full"
+                    />
+                  </div>
                   {[BarChart3, FileText, ClipboardCheck, Users].map((Icon, index) => (
                     <span key={index} className={index === 0 ? 'active' : ''}><Icon size={14} /></span>
                   ))}
@@ -281,9 +310,20 @@ export default function Home() {
           <p>From document upload to final student results, AutoGrade keeps every step organized and reviewable.</p>
         </div>
         <div className="feature-grid">
-          {features.map(({ icon: Icon, title, description }) => (
+          {features.map(({ image, icon: Icon, title, description }) => (
             <article className="feature-card" key={title}>
-              <div className="feature-icon"><Icon size={22} /></div>
+              <div className="feature-image-wrapper">
+                <Image
+                  src={image}
+                  alt={title}
+                  width={380}
+                  height={190}
+                  className="feature-image"
+                />
+                <span className="feature-badge">
+                  <Icon size={16} />
+                </span>
+              </div>
               <h3>{title}</h3>
               <p>{description}</p>
               <Link href="/login" className="feature-link">Learn more <ChevronRight size={15} /></Link>
@@ -302,9 +342,21 @@ export default function Home() {
             <p>Designed for teachers who need accurate automation without losing human control.</p>
           </div>
           <div className="steps-grid">
-            {steps.map(({ number, icon: Icon, title, description }) => (
+            {steps.map(({ number, image, icon: Icon, title, description }) => (
               <article className="step-card" key={number}>
-                <div className="step-top"><span>{number}</span><Icon size={24} /></div>
+                <div className="step-image-wrapper">
+                  <Image
+                    src={image}
+                    alt={title}
+                    width={360}
+                    height={180}
+                    className="step-image"
+                  />
+                  <div className="step-top-badge">
+                    <span>{number}</span>
+                    <Icon size={16} />
+                  </div>
+                </div>
                 <h3>{title}</h3>
                 <p>{description}</p>
               </article>
@@ -375,13 +427,19 @@ export default function Home() {
         <div className="footer-main">
           <div className="footer-brand">
             <Link href="/" className="brand">
-              <span className="brand-mark"><GraduationCap size={22} /></span>
+              <Image
+                src="/favicon-round.png"
+                alt="AutoGrade Logo"
+                width={34}
+                height={34}
+                className="w-[34px] h-[34px] object-contain rounded-full shadow-sm"
+              />
               <span>AutoGrade</span>
             </Link>
             <p>AI-assisted examination evaluation for modern academic teams.</p>
           </div>
           <div className="footer-links">
-            <div><strong>Product</strong><Link href="#features">Features</Link><Link href="#how-it-works">How it works</Link><Link href={dashboardLink}>Dashboard</Link></div>
+            <div><strong>Product</strong><a href="#features" onClick={(e) => handleNavScroll(e, 'features')}>Features</a><a href="#how-it-works" onClick={(e) => handleNavScroll(e, 'how-it-works')}>How it works</a><Link href={dashboardLink}>Dashboard</Link></div>
             <div><strong>Access</strong><Link href="/login">Log in</Link><Link href="/register/teacher">Teacher sign up</Link><Link href="/register/student">Student sign up</Link></div>
           </div>
         </div>

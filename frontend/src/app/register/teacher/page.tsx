@@ -1,5 +1,7 @@
 'use client';
 
+import Image from 'next/image';
+
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
@@ -75,11 +77,15 @@ export default function TeacherRegistrationPage() {
     <div className="min-h-screen bg-[#FFF8EB] flex items-center justify-center p-6">
       <div className="w-full max-w-2xl bg-white border border-[#E8DCC8] rounded-2xl shadow-sm p-8 space-y-6">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 bg-[#005461] rounded-xl flex items-center justify-center">
-            <UserRoundCheck size={22} className="text-[#FAB963]" />
-          </div>
+          <Image
+            src="/favicon-round.png"
+            alt="AutoGrade Logo"
+            width={44}
+            height={44}
+            className="w-11 h-11 object-contain rounded-full shadow-sm"
+          />
           <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-[#6BAAB5]">Teacher Portal</p>
+            <p className="text-sm uppercase tracking-[0.2em] text-[#6BAAB5]">AutoGrade • Teacher Portal</p>
             <h1 className="text-2xl font-bold text-[#1A1A1A]">Create teacher account</h1>
           </div>
         </div>

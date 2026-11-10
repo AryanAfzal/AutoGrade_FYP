@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from '@/components/layout/Sidebar';
 import Topbar from '@/components/layout/Topbar';
+import { SidebarProvider } from '@/components/layout/SidebarContext';
 import { clearAuthSession, getStoredUser, getToken } from '@/lib/api';
 
 export default function DashboardLayout({
@@ -84,12 +85,30 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-[#FFF8EB]">
+    <SidebarProvider>
+      <DashboardContent>{children}</DashboardContent>
+    </SidebarProvider>
+  );
+}
+
+function DashboardContent({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="h-screen w-screen overflow-hidden flex bg-[#FFF8EB]">
+      {/* 1. Static Sidebar on left: locked to full height, shrink-0, never scrolls */}
       <Sidebar />
-      <Topbar />
-      <main className="ml-60 pt-16 min-h-screen">
-        <div className="p-8">{children}</div>
-      </main>
+
+      {/* 2. Dynamic Right Column */}
+      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
+        {/* Topbar locked at top of the right column, never scrolls */}
+        <Topbar />
+
+        {/* Scrollable content pane - ONLY this area scrolls when user scrolls! */}
+        <main className="flex-1 overflow-y-auto bg-[#FFF8EB]">
+          <div className="p-8 max-w-[1600px] mx-auto min-h-full">
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

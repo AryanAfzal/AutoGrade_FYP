@@ -10,6 +10,11 @@ import ThemeToggle from '@/components/layout/ThemeToggle';
 export const metadata: Metadata = {
   title: 'AutoGrade',
   description: 'AI-powered exam evaluation and academic analytics platform',
+  icons: {
+    icon: '/favicon-round.png',
+    shortcut: '/favicon-round.png',
+    apple: '/apple-icon.png',
+  },
 };
 
 export default function RootLayout({
