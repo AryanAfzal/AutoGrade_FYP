@@ -26,6 +26,17 @@ export class ExamsService {
     private dataSource: DataSource,
   ) {}
 
+  private sortExamQuestions<T extends { questions?: Question[] }>(exam: T): T {
+    if (exam?.questions?.length) {
+      exam.questions.sort(
+        (a, b) =>
+          (a.orderIndex ?? Number.MAX_SAFE_INTEGER) -
+          (b.orderIndex ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
+    return exam;
+  }
+
   async create(dto: CreateExamDto, user: User) {
     let department = user.departmentId
       ? await this.departmentRepo.findOne({ where: { id: user.departmentId, active: true } })
@@ -107,23 +118,25 @@ export class ExamsService {
     });
     const saved = await this.examRepo.save(exam);
 
-    const questions = dto.questions.map((q) =>
-      this.questionRepo.create({ ...q, exam: saved }),
+    const questions = dto.questions.map((q, index) =>
+      this.questionRepo.create({ ...q, orderIndex: index + 1, exam: saved }),
     );
     await this.questionRepo.save(questions);
 
-    return this.examRepo.findOne({
+    const loaded = await this.examRepo.findOne({
       where: { id: saved.id },
       relations: ['questions'],
     });
+    return loaded ? this.sortExamQuestions(loaded) : loaded;
   }
 
-  findAll(user: User) {
-    return this.examRepo.find({
+  async findAll(user: User) {
+    const exams = await this.examRepo.find({
       where: { createdBy: { id: user.id } },
       relations: ['questions'],
       order: { createdAt: 'DESC' },
     });
+    return exams.map((exam) => this.sortExamQuestions(exam));
   }
 
   async findOne(id: string, user: User) {
@@ -134,7 +147,7 @@ export class ExamsService {
     if (!exam) {
       throw new BadRequestException('Exam not found or you do not have access to it.');
     }
-    return exam;
+    return this.sortExamQuestions(exam);
   }
 
   async updateRecheckDeadline(id: string, deadline: string, user: User) {

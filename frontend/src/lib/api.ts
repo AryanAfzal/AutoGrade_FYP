@@ -509,9 +509,14 @@ export const examApi = {
 };
 
 export const uploadApi = {
-  uploadSheets: async (examId: string, files: File[]) => {
+  uploadSheets: async (
+    examId: string,
+    files: File[],
+    ocrEngine: import('@/types').OcrEngine = 'trocr',
+  ) => {
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
+    formData.append('ocrEngine', ocrEngine);
     const token = getToken();
     const res = await fetch(`${BASE_URL}/uploads/${examId}`, {
       method: 'POST',
@@ -551,10 +556,14 @@ export const uploadApi = {
 };
 
 export const evaluationApi = {
-  triggerEvaluation: async (examId: string) => {
+  triggerEvaluation: async (
+    examId: string,
+    ocrEngine?: import('@/types').OcrEngine,
+  ) => {
     const res = await fetch(`${BASE_URL}/evaluation/${examId}/trigger`, {
       method: 'POST',
       headers: authHeaders(),
+      body: ocrEngine ? JSON.stringify({ ocrEngine }) : undefined,
     });
     return handleResponse<{
       started: boolean;

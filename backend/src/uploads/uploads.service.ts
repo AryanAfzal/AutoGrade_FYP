@@ -39,7 +39,9 @@ export class UploadsService {
     private dataSource: DataSource,
   ) {}
 
-  async uploadSheets(examId: string, files: Express.Multer.File[]) {
+  async uploadSheets(examId: string, files: Express.Multer.File[], ocrEngine?: string) {
+    const resolvedOcrEngine: 'trocr' | 'pen_to_print' =
+      ocrEngine === 'pen_to_print' ? 'pen_to_print' : 'trocr';
     const sheets = [];
 
     for (const file of files) {
@@ -75,6 +77,7 @@ export class UploadsService {
         studentName:    matchedStudent?.fullName || studentName,
         registrationNo: resolvedRegistrationNo,
         filePath:       absolutePath,   // store absolute path so evaluation can find it too
+        ocrEngine:      resolvedOcrEngine,
         status:         'uploaded',
       });
       sheets.push(await this.sheetRepo.save(sheet));

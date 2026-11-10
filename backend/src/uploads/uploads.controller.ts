@@ -1,6 +1,6 @@
 import {
   Controller, Post, Get, Param, Delete, Request, Res, StreamableFile,
-  UseGuards, UseInterceptors, UploadedFiles,
+  Body, UseGuards, UseInterceptors, UploadedFiles,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FilesInterceptor } from '@nestjs/platform-express';
@@ -28,8 +28,9 @@ export class UploadsController {
   uploadSheets(
     @Param('examId') examId: string,
     @UploadedFiles() files: Express.Multer.File[],
+    @Body('ocrEngine') ocrEngine?: string,
   ) {
-    return this.uploadsService.uploadSheets(examId, files);
+    return this.uploadsService.uploadSheets(examId, files, ocrEngine);
   }
 
   @Get(':examId')

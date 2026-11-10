@@ -106,7 +106,7 @@ GENERAL_OCR_CONFUSABLES = [
 ]
 
 # Question header patterns (handles Qno 1:-), Q#01:, Q# 02, #01., C#O2, #O3, PHO 1 ., 00, no 26- ms:, Q#?:, Qno1)A Ans:-)
-HEADER_PREFIX_PATTERN = r"(?:[Oo0]{2,3}|(?:Q\s*(?:no\.?|uestion\s*(?:no\.?)?|#|\.)?|PH[O0o#]?|P#|[A-Za-z0-9]\s*#|#|no\.?)\s*[Oo0\s]*([?\d]+)?)"
+HEADER_PREFIX_PATTERN = r"(?:[Oo0]{2,3}|(?:Q\s*(?:uestion)?\s*(?:no\.?)?\s*(?:#|\.)?|PH[O0o#]?|P#|[A-Za-z0-9]\s*#|#|no\.?)\s*[Oo0\s]*([?\d]+)?)"
 
 HEADER_PATTERN_STANDALONE = re.compile(
     rf"^{HEADER_PREFIX_PATTERN}\s*[:.\-)=~]*(?:\s*\(?[A-Za-z]?\)?\s*[:.\-)=~]*\s*(?:ans|ms|anwser|answer)[\s:.\-]*)?$",
@@ -123,6 +123,7 @@ IGNORED_PATTERNS = [
     r"^cs\s*camscanner.*$",
     r"^.*63\s*camscanner.*$",
     r"^camscanner.*$",
+    r"^cs$",
     r"^scanned\s+with.*$",
     r"^scanned\s+by.*$",
     r"^\*?\*?corrected text:?\*?\*?$",

@@ -46,6 +46,7 @@ class EvaluateRequest(BaseModel):
     filePath:      str
     examId:        str
     questions:     list[QuestionPayload]
+    ocrEngine:     Literal["trocr", "pen_to_print"] = "trocr"
 
 
 
@@ -53,9 +54,10 @@ class EvaluateRequest(BaseModel):
 def evaluate_endpoint(body: EvaluateRequest):
     started_at = time.perf_counter()
     logger.info(
-        "Evaluation started: sheet=%s questions=%s",
+        "Evaluation started: sheet=%s questions=%s ocrEngine=%s",
         body.answersheetId,
         len(body.questions),
+        body.ocrEngine,
     )
     if not os.path.exists(body.filePath):
         logger.error(
@@ -80,6 +82,7 @@ def evaluate_endpoint(body: EvaluateRequest):
         body.filePath,
         expected_question_count=len(body.questions),
         expected_question_texts=[question.questionText for question in body.questions],
+        ocr_engine=body.ocrEngine,
     )
     logger.info(
         "Answer extraction finished: sheet=%s answers=%s elapsed=%.1fs",
