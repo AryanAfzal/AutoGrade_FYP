@@ -40,8 +40,12 @@ export class UploadsService {
   ) {}
 
   async uploadSheets(examId: string, files: Express.Multer.File[], ocrEngine?: string) {
-    const resolvedOcrEngine: 'trocr' | 'pen_to_print' =
-      ocrEngine === 'pen_to_print' ? 'pen_to_print' : 'trocr';
+    const resolvedOcrEngine: 'trocr' | 'pen_to_print' | 'omr' =
+      ocrEngine === 'omr'
+        ? 'omr'
+        : ocrEngine === 'pen_to_print'
+          ? 'pen_to_print'
+          : 'trocr';
     const sheets = [];
 
     for (const file of files) {
@@ -68,9 +72,10 @@ export class UploadsService {
       const rollNumberFromFilename = extractRollNumberFromFilename(file.originalname);
       const resolvedRegistrationNo =
         rollNumberFromFilename || registrationNo;
-      const matchedStudent = rollNumberFromFilename
-        ? await this.usersService.findByRollNumber(rollNumberFromFilename)
-        : null;
+      const matchedStudent =
+        resolvedRegistrationNo && resolvedRegistrationNo !== 'Unknown'
+          ? await this.usersService.findByRollNumber(resolvedRegistrationNo)
+          : null;
 
       const sheet = this.sheetRepo.create({
         exam:           { id: examId },
@@ -214,6 +219,20 @@ export class UploadsService {
             `Answer sheet ${sheet.id} was deleted, but its file cleanup failed: ${resolvedPath}`,
             error instanceof Error ? error.stack : String(error),
           );
+        }
+      }
+    }
+
+    if (sheet.omrAnnotatedPath) {
+      const resolvedOmrPath = path.resolve(sheet.omrAnnotatedPath);
+      const relativeOmrPath = path.relative(uploadsDirectory, resolvedOmrPath);
+      if (!relativeOmrPath.startsWith('..') && !path.isAbsolute(relativeOmrPath)) {
+        try {
+          await fs.unlink(resolvedOmrPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            this.logger.warn(`Failed to clean up OMR annotated image: ${resolvedOmrPath}`);
+          }
         }
       }
     }

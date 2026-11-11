@@ -5,11 +5,16 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   Flag,
   Loader,
+  Maximize2,
+  ScanLine,
   TrendingDown,
   MessageSquare,
+  X,
+  XCircle,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -52,6 +57,11 @@ function AIReviewContent() {
   const [recheckDeadline, setRecheckDeadline] = useState('');
   const [savingDeadline, setSavingDeadline] = useState(false);
   const [filter, setFilter] = useState<'all' | 'flagged' | 'high-similarity'>('all');
+  const [omrImageUrl, setOmrImageUrl] = useState<string | null>(null);
+  const [omrImageLoading, setOmrImageLoading] = useState(false);
+  const [omrImageError, setOmrImageError] = useState('');
+  const [omrModalOpen, setOmrModalOpen] = useState(false);
+  const [approvingAll, setApprovingAll] = useState(false);
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -82,7 +92,11 @@ function AIReviewContent() {
           localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
           setRecheckDeadline(localDate.toISOString().slice(0, 16));
         }
-        setResults(resultsData.filter((r) => r.status === 'awaiting_approval'));
+        const awaiting = resultsData.filter((r) => r.status === 'awaiting_approval');
+        setResults(awaiting);
+        if (awaiting.length > 0) {
+          setSelectedStudentId((prev) => prev ?? awaiting[0].answersheetId);
+        }
       })
       .catch((loadError: unknown) =>
         setError(
@@ -239,6 +253,74 @@ function AIReviewContent() {
   const selectedStudent = selectedStudentId
     ? results.find((r) => r.answersheetId === selectedStudentId)
     : null;
+
+  useEffect(() => {
+    setOmrModalOpen(false);
+    if (!examId || !selectedStudent || selectedStudent.ocrEngine !== 'omr') {
+      setOmrImageUrl(null);
+      setOmrImageError('');
+      setOmrImageLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setOmrImageUrl(null);
+    setOmrImageError('');
+    setOmrImageLoading(true);
+
+    evaluationApi
+      .getOmrImage(examId, selectedStudent.answersheetId, controller.signal)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setOmrImageUrl(objectUrl);
+      })
+      .catch((imgError: unknown) => {
+        if (!controller.signal.aborted) {
+          setOmrImageError(
+            imgError instanceof Error
+              ? imgError.message
+              : 'Unable to load highlighted OMR sheet.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setOmrImageLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [examId, selectedStudent?.answersheetId, selectedStudent?.ocrEngine]);
+
+  const handleApproveAllEntries = async (student: StudentResult) => {
+    if (!examId) return;
+    const pendingEntries = student.entries.filter((e) => e.reviewStatus === 'pending');
+    if (pendingEntries.length === 0) return;
+
+    setApprovingAll(true);
+    setError('');
+    setNotice('');
+    try {
+      for (const entry of pendingEntries) {
+        await evaluationApi.reviewAnswerEntry(examId, entry.id, { action: 'approve' });
+      }
+      const refreshedResults = await evaluationApi.getResults(examId);
+      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
+      setNotice(
+        `Approved ${pendingEntries.length} question mark${pendingEntries.length === 1 ? '' : 's'} for ${student.studentName}.`,
+      );
+    } catch (bulkError: unknown) {
+      setError(
+        bulkError instanceof Error
+          ? bulkError.message
+          : 'Unable to approve all question marks.',
+      );
+    } finally {
+      setApprovingAll(false);
+    }
+  };
 
   const canPublish =
     results.some((result) => !!result.reviewCompletedAt) &&
@@ -449,8 +531,14 @@ function AIReviewContent() {
                         <Badge variant="success">Done · ready to publish</Badge>
                       )}
 
-                      {(flaggedCount > 0 || hasSimilarity) && (
+                      {(flaggedCount > 0 || hasSimilarity || result.ocrEngine === 'omr') && (
                         <div className="flex gap-2 flex-wrap">
+                          {result.ocrEngine === 'omr' && (
+                            <Badge variant="info" className="text-xs">
+                              <ScanLine size={10} className="mr-1" />
+                              OMR MCQ
+                            </Badge>
+                          )}
                           {flaggedCount > 0 && (
                             <Badge variant="danger" className="text-xs">
                               <Flag size={10} className="mr-1" />
@@ -487,26 +575,41 @@ function AIReviewContent() {
                     {selectedStudent.reviewCompletedAt ? (
                       <Badge variant="success">Done · ready to publish</Badge>
                     ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => handleCompleteReview(selectedStudent)}
-                        loading={completingResultId === selectedStudent.answersheetId}
-                        disabled={
-                          !!completingResultId ||
-                          selectedStudent.entries.length !== exam?.questions.length ||
-                          selectedStudent.entries.some(
-                            (entry) =>
-                              entry.reviewStatus === 'pending' ||
-                              entry.approvedMark === null ||
-                              entry.approvedMark === undefined,
-                          )
-                        }
-                      >
-                        <CheckCircle2 size={14} className="mr-2" />
-                        Done reviewing this paper
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {selectedStudent.entries.some((entry) => entry.reviewStatus === 'pending') && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleApproveAllEntries(selectedStudent)}
+                            loading={approvingAll}
+                            disabled={approvingAll || !!reviewingEntryId || !!completingResultId}
+                          >
+                            <CheckCircle2 size={14} className="mr-2" />
+                            Approve all marks ({selectedStudent.entries.filter((e) => e.reviewStatus === 'pending').length})
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleCompleteReview(selectedStudent)}
+                          loading={completingResultId === selectedStudent.answersheetId}
+                          disabled={
+                            !!completingResultId ||
+                            approvingAll ||
+                            selectedStudent.entries.length !== exam?.questions.length ||
+                            selectedStudent.entries.some(
+                              (entry) =>
+                                entry.reviewStatus === 'pending' ||
+                                entry.approvedMark === null ||
+                                entry.approvedMark === undefined,
+                            )
+                          }
+                        >
+                          <CheckCircle2 size={14} className="mr-2" />
+                          Done reviewing this paper
+                        </Button>
+                      </div>
                     )}
                   </div>
 
@@ -524,19 +627,100 @@ function AIReviewContent() {
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-[#888888]">Flagged</p>
-                      <p className="text-xl font-bold text-red-500 mt-1">
-                        {selectedStudent.entries.filter((e) => e.isFlagged).length}
+                      <p className="text-xs text-[#888888]">
+                        {selectedStudent.ocrEngine === 'omr' ? 'Right / Wrong' : 'Flagged'}
                       </p>
+                      {selectedStudent.ocrEngine === 'omr' ? (
+                        <p className="text-xl font-bold mt-1">
+                          <span className="text-emerald-600">
+                            {selectedStudent.entries.filter((e) => e.isCorrect).length}
+                          </span>
+                          <span className="text-[#888888] mx-1">/</span>
+                          <span className="text-red-500">
+                            {selectedStudent.entries.filter((e) => !e.isCorrect).length}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-xl font-bold text-red-500 mt-1">
+                          {selectedStudent.entries.filter((e) => e.isFlagged).length}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
               </Card>
 
+              {/* Highlighted OMR Checked Sheet Preview */}
+              {selectedStudent.ocrEngine === 'omr' && (
+                <Card>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-semibold text-[#005461] uppercase tracking-wide flex items-center gap-2">
+                          <ScanLine size={15} />
+                          Checked OMR Sheet (Right / Wrong Highlights)
+                        </h4>
+                        <p className="text-xs text-[#777777] mt-0.5">
+                          Green = Right bubble · Red X = Wrong mark (green outline shows answer key) · Amber = Blank / Multiple
+                        </p>
+                      </div>
+                      {omrImageUrl && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setOmrModalOpen(true)}
+                        >
+                          <Maximize2 size={14} className="mr-1.5" />
+                          Expand Full Sheet
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-[#E8DCC8] bg-[#F7F5F0] overflow-hidden flex items-center justify-center min-h-[260px]">
+                      {omrImageLoading ? (
+                        <div className="flex items-center gap-2 py-12 text-sm text-[#777777]">
+                          <Loader size={16} className="animate-spin text-[#005461]" />
+                          Loading checked OMR sheet...
+                        </div>
+                      ) : omrImageError ? (
+                        <div className="flex flex-col items-center gap-2 py-10 px-4 text-center">
+                          <AlertCircle size={22} className="text-[#B45309]" />
+                          <p className="text-sm font-medium text-[#333333]">Highlighted OMR image unavailable</p>
+                          <p className="text-xs text-[#777777]">{omrImageError}</p>
+                        </div>
+                      ) : omrImageUrl ? (
+                        <img
+                          src={omrImageUrl}
+                          alt={`Checked OMR sheet for ${selectedStudent.studentName}`}
+                          className="w-full max-h-[680px] object-contain bg-white cursor-zoom-in"
+                          onClick={() => setOmrModalOpen(true)}
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
               {/* Answer details */}
               <div className="space-y-2">
-                {selectedStudent.entries.map((entry, idx) => (
-                  <Card key={entry.id} padding="sm" className={cn(entry.isFlagged && 'border-red-200 bg-red-50')}>
+                {selectedStudent.entries.map((entry, idx) => {
+                  const omr = entry.omrDetails;
+                  const omrWrong = omr && omr.status === 'wrong';
+                  const omrRight = omr && omr.status === 'correct';
+                  const omrFlag = omr && (omr.status === 'blank' || omr.status === 'multiple');
+
+                  return (
+                  <Card
+                    key={entry.id}
+                    padding="sm"
+                    className={cn(
+                      omrWrong && 'border-red-300 bg-red-50/40',
+                      omrRight && 'border-emerald-200 bg-emerald-50/20',
+                      omrFlag && 'border-amber-300 bg-amber-50/40',
+                      !omr && entry.isFlagged && 'border-red-200 bg-red-50',
+                    )}
+                  >
                     <div className="space-y-3">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -544,15 +728,36 @@ function AIReviewContent() {
                             Q{idx + 1}: {entry.questionText}
                           </p>
                           <div className="flex gap-2 mt-2 flex-wrap">
-                            <Badge variant="default">{entry.aiMark}/{entry.maxMarks}</Badge>
+                            <Badge variant={omrRight ? 'success' : omrWrong ? 'danger' : 'default'}>
+                              {entry.aiMark}/{entry.maxMarks}
+                            </Badge>
+                            {omr && (
+                              <Badge variant={omrRight ? 'success' : omrWrong ? 'danger' : 'amber'}>
+                                {omrRight ? (
+                                  <span className="flex items-center gap-1">
+                                    <Check size={11} /> Right ({omr.selectedOption})
+                                  </span>
+                                ) : omrWrong ? (
+                                  <span className="flex items-center gap-1">
+                                    <XCircle size={11} /> Wrong · Marked {omr.selectedOption} (Key: {omr.correctOption})
+                                  </span>
+                                ) : omr.status === 'blank' ? (
+                                  `Blank (Key: ${omr.correctOption})`
+                                ) : (
+                                  `Multiple Marked: ${omr.selectedOption} (Key: ${omr.correctOption})`
+                                )}
+                              </Badge>
+                            )}
                             {entry.reviewStatus !== 'pending' && (
                               <Badge variant={entry.reviewStatus === 'overridden' ? 'warning' : 'success'}>
                                 {entry.reviewStatus === 'overridden' ? 'Overridden' : 'Approved'} · {entry.approvedMark}/{entry.maxMarks}
                               </Badge>
                             )}
-                            <Badge variant={confidenceVariant(entry.confidence)}>
-                              {getConfidenceLabel(entry.confidence)} - {Math.round(entry.confidence * 100)}%
-                            </Badge>
+                            {!omr && (
+                              <Badge variant={confidenceVariant(entry.confidence)}>
+                                {getConfidenceLabel(entry.confidence)} - {Math.round(entry.confidence * 100)}%
+                              </Badge>
+                            )}
                             {entry.isFlagged && (
                               <Badge variant="danger">
                                 <Flag size={10} className="mr-1" />
@@ -563,62 +768,128 @@ function AIReviewContent() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2 text-xs border-t border-[#E8DCC8] pt-2">
-                        <div>
-                          <p className="text-[#888888]">Keyword Score</p>
-                          <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.keywordScore * 100)}%</p>
-                        </div>
-                        <div>
-                          <p className="text-[#888888]">Semantic Score</p>
-                          <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.semanticScore * 100)}%</p>
-                        </div>
-                        <div>
-                          <p className="text-[#888888]">Confidence</p>
-                          <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.confidence * 100)}%</p>
-                        </div>
-                        {entry.conceptScore !== undefined && (
-                          <div>
-                            <p className="text-[#888888]">Rubric coverage</p>
-                            <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.conceptScore * 100)}%</p>
-                          </div>
-                        )}
-                      </div>
+                      {omr ? (
+                        <div className="space-y-3 border-t border-[#E8DCC8] pt-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-xs font-medium text-[#666666]">Detected Bubbles:</span>
+                            <div className="flex items-center gap-2">
+                              {(['A', 'B', 'C', 'D'] as const).map((opt) => {
+                                const selectedList = omr.selectedOption
+                                  ? omr.selectedOption.split(',').map((s) => s.trim())
+                                  : [];
+                                const isSelected = selectedList.includes(opt);
+                                const isKey = omr.correctOption === opt;
+                                const ratioPct = Math.round((omr.fillRatios?.[opt] ?? 0) * 100);
 
-                      {!!entry.rubricBreakdown?.length && (
-                        <div className="space-y-2 rounded-lg border border-[#E8DCC8] bg-[#FFFDF8] p-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-[#005461]">
-                            Rubric breakdown
-                          </p>
-                          {entry.rubricBreakdown.map((concept) => (
-                            <div
-                              key={concept.conceptName}
-                              className="flex flex-wrap items-center justify-between gap-2 border-t border-[#E8DCC8] pt-2 text-sm"
-                            >
-                              <div>
-                                <p className="font-medium text-[#1A1A1A]">{concept.conceptName}</p>
-                                <p className="text-xs text-[#888888]">
-                                  {concept.status} · {concept.strictness} · {Math.round(concept.coverage * 100)}% coverage
-                                </p>
-                              </div>
-                              <Badge variant={concept.status === 'addressed' ? 'success' : concept.status === 'partially addressed' ? 'warning' : 'danger'}>
-                                {concept.awardedMarks}/{concept.maxMarks} marks
-                              </Badge>
+                                let bubbleStyle = 'border-[#D8CCBA] bg-white text-[#555555]';
+                                if (isSelected && isKey) {
+                                  bubbleStyle = 'border-emerald-600 bg-emerald-600 text-white shadow-sm';
+                                } else if (isSelected && !isKey) {
+                                  bubbleStyle =
+                                    omr.status === 'multiple'
+                                      ? 'border-amber-500 bg-amber-500 text-white'
+                                      : 'border-red-600 bg-red-600 text-white shadow-sm';
+                                } else if (!isSelected && isKey) {
+                                  bubbleStyle =
+                                    'border-2 border-emerald-600 bg-emerald-50 text-emerald-700 font-bold';
+                                }
+
+                                return (
+                                  <div
+                                    key={opt}
+                                    title={`Option ${opt}: ${ratioPct}% filled`}
+                                    className="flex flex-col items-center gap-0.5"
+                                  >
+                                    <span
+                                      className={cn(
+                                        'w-8 h-8 rounded-full border flex items-center justify-center text-xs font-bold',
+                                        bubbleStyle,
+                                      )}
+                                    >
+                                      {opt}
+                                    </span>
+                                    <span className="text-[10px] text-[#888888]">{ratioPct}%</span>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          </div>
 
-                      <div className="bg-white rounded border border-[#E8DCC8] p-3">
-                        <p className="text-xs font-medium text-[#888888] mb-1">Student Answer:</p>
-                        <p className="text-sm text-[#1A1A1A] whitespace-pre-wrap break-words">
-                          {entry.studentAnswer?.trim() || 'No answer was extracted for this question.'}
-                        </p>
-                      </div>
-                      {entry.feedback && (
-                        <div className="rounded border border-[#E8DCC8] bg-white p-3">
-                          <p className="mb-1 text-xs font-medium text-[#888888]">Rubric feedback draft</p>
-                          <p className="text-sm text-[#1A1A1A]">{entry.feedback}</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="bg-white rounded border border-[#E8DCC8] p-2.5">
+                              <p className="text-xs font-medium text-[#888888] mb-0.5">Student Marked:</p>
+                              <p className="text-sm text-[#1A1A1A] font-medium">
+                                {entry.studentAnswer || 'Blank'}
+                              </p>
+                            </div>
+                            <div className="bg-white rounded border border-emerald-200 p-2.5">
+                              <p className="text-xs font-medium text-emerald-700 mb-0.5">Correct Option:</p>
+                              <p className="text-sm text-[#1A1A1A] font-medium">
+                                {entry.referenceAnswer || omr.correctOption}
+                              </p>
+                            </div>
+                          </div>
                         </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-3 gap-2 text-xs border-t border-[#E8DCC8] pt-2">
+                            <div>
+                              <p className="text-[#888888]">Keyword Score</p>
+                              <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.keywordScore * 100)}%</p>
+                            </div>
+                            <div>
+                              <p className="text-[#888888]">Semantic Score</p>
+                              <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.semanticScore * 100)}%</p>
+                            </div>
+                            <div>
+                              <p className="text-[#888888]">Confidence</p>
+                              <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.confidence * 100)}%</p>
+                            </div>
+                            {entry.conceptScore !== undefined && (
+                              <div>
+                                <p className="text-[#888888]">Rubric coverage</p>
+                                <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.conceptScore * 100)}%</p>
+                              </div>
+                            )}
+                          </div>
+
+                          {!!entry.rubricBreakdown?.length && (
+                            <div className="space-y-2 rounded-lg border border-[#E8DCC8] bg-[#FFFDF8] p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-[#005461]">
+                                Rubric breakdown
+                              </p>
+                              {entry.rubricBreakdown.map((concept) => (
+                                <div
+                                  key={concept.conceptName}
+                                  className="flex flex-wrap items-center justify-between gap-2 border-t border-[#E8DCC8] pt-2 text-sm"
+                                >
+                                  <div>
+                                    <p className="font-medium text-[#1A1A1A]">{concept.conceptName}</p>
+                                    <p className="text-xs text-[#888888]">
+                                      {concept.status} · {concept.strictness} · {Math.round(concept.coverage * 100)}% coverage
+                                    </p>
+                                  </div>
+                                  <Badge variant={concept.status === 'addressed' ? 'success' : concept.status === 'partially addressed' ? 'warning' : 'danger'}>
+                                    {concept.awardedMarks}/{concept.maxMarks} marks
+                                  </Badge>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="bg-white rounded border border-[#E8DCC8] p-3">
+                            <p className="text-xs font-medium text-[#888888] mb-1">Student Answer:</p>
+                            <p className="text-sm text-[#1A1A1A] whitespace-pre-wrap break-words">
+                              {entry.studentAnswer?.trim() || 'No answer was extracted for this question.'}
+                            </p>
+                          </div>
+                          {entry.feedback && (
+                            <div className="rounded border border-[#E8DCC8] bg-white p-3">
+                              <p className="mb-1 text-xs font-medium text-[#888888]">Rubric feedback draft</p>
+                              <p className="text-sm text-[#1A1A1A]">{entry.feedback}</p>
+                            </div>
+                          )}
+                        </>
                       )}
                       <div className="space-y-3 rounded-lg border border-[#E8DCC8] bg-[#FFFDF8] p-3">
                         <div>
@@ -711,7 +982,8 @@ function AIReviewContent() {
                       </div>
                     </div>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Action buttons */}
@@ -726,6 +998,42 @@ function AIReviewContent() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {omrModalOpen && omrImageUrl && selectedStudent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          onClick={() => setOmrModalOpen(false)}
+        >
+          <div
+            className="relative max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl bg-white p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-[#E8DCC8] mb-3">
+              <div>
+                <p className="text-sm font-semibold text-[#005461]">
+                  {selectedStudent.studentName} · {selectedStudent.registrationNo}
+                </p>
+                <p className="text-xs text-[#777777]">
+                  Highlighted OMR MCQ Sheet ({selectedStudent.totalAiMark}/{selectedStudent.totalMaxMarks})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOmrModalOpen(false)}
+                className="rounded-lg p-1.5 text-[#666666] hover:bg-[#F5EFE6] hover:text-[#1A1A1A]"
+                aria-label="Close OMR sheet preview"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <img
+              src={omrImageUrl}
+              alt={`Full checked OMR sheet for ${selectedStudent.studentName}`}
+              className="w-full h-auto rounded-lg border border-[#E8DCC8]"
+            />
+          </div>
         </div>
       )}
     </div>

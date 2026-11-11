@@ -3,9 +3,10 @@ import logging
 import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from services.pdf_parser import extract_answers_from_sheet
 from services.evaluator import evaluate_answer_sheet
+from services.omr_grader import evaluate_omr_sheet
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class QuestionPayload(BaseModel):
     clo: str
     correctAnswer: Optional[str] = None
     referenceAnswer: Optional[str] = None
+    options: Optional[list[dict[str, Any]]] = None
     keywords: Optional[list[str]] = None
     rubric: Optional[QuestionRubricPayload] = None
 
@@ -46,7 +48,8 @@ class EvaluateRequest(BaseModel):
     filePath:      str
     examId:        str
     questions:     list[QuestionPayload]
-    ocrEngine:     Literal["trocr", "pen_to_print"] = "trocr"
+    ocrEngine:     Literal["trocr", "pen_to_print", "omr"] = "trocr"
+    omrOutputPath: Optional[str] = None
 
 
 
@@ -75,6 +78,26 @@ def evaluate_endpoint(body: EvaluateRequest):
             status_code=400,
             detail="No questions provided for evaluation."
         )
+
+    if body.ocrEngine == "omr":
+        omr_started_at = time.perf_counter()
+        if body.omrOutputPath:
+            output_img_path = body.omrOutputPath
+        else:
+            uploads_dir = os.path.dirname(os.path.abspath(body.filePath))
+            output_img_path = os.path.join(uploads_dir, "omr-annotated", f"{body.answersheetId}.png")
+
+        questions_list = [q.model_dump() for q in body.questions]
+        result = evaluate_omr_sheet(body.filePath, questions_list, output_img_path)
+        logger.info(
+            "OMR evaluation finished: sheet=%s total=%.2fs",
+            body.answersheetId,
+            time.perf_counter() - omr_started_at,
+        )
+        return {
+            "answersheetId": body.answersheetId,
+            **result,
+        }
 
     # Step 1: Parse student answers from the PDF
     parsing_started_at = time.perf_counter()

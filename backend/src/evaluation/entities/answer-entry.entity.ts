@@ -70,4 +70,12 @@ export class AnswerEntry {
 
   @Column({ type: 'text', nullable: true })
   feedback: string | null;
+
+  @Column('jsonb', { nullable: true })
+  omrDetails: {
+    selectedOption: string;
+    correctOption: string;
+    fillRatios: Record<string, number>;
+    status: 'correct' | 'wrong' | 'blank' | 'multiple';
+  } | null;
 }

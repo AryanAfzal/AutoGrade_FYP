@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Request,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -37,6 +38,20 @@ export class EvaluationController {
   @Get(':examId/similarity')
   getSimilarityFlags(@Param('examId') examId: string, @Request() req) {
     return this.evaluationService.getSimilarityFlags(examId, req.user);
+  }
+
+  @Get(':examId/sheets/:sheetId/omr-image')
+  async getOmrAnnotatedImage(
+    @Param('examId') examId: string,
+    @Param('sheetId') sheetId: string,
+    @Request() req,
+  ) {
+    const { stream, fileName } =
+      await this.evaluationService.getOmrAnnotatedImage(examId, sheetId, req.user);
+    return new StreamableFile(stream, {
+      type: 'image/png',
+      disposition: `inline; filename="${fileName}"`,
+    });
   }
 
   @Patch(':examId/entries/:entryId/review')
