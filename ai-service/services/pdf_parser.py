@@ -15,23 +15,70 @@ def extract_student_info(file_path: str) -> dict:
         r"(?:student\s*name|name)\s*[:\-]\s*(.+)", re.IGNORECASE
     )
     reg_pattern = re.compile(
-        r"(?:reg(?:istration)?\s*(?:no|number|#)|roll\s*no)\s*[:\-]\s*([A-Za-z0-9\-]+)",
+        r"(?:candidate\s*(?:id|no|number)|student\s*(?:id|no)|reg(?:istration)?\s*(?:no|number|#)|roll\s*(?:no|number)?)\s*[:\-]\s*([A-Za-z0-9\-]+)",
+        re.IGNORECASE,
+    )
+    roll_inline_pattern = re.compile(
+        r"\b((?:SP|FA)\s*\d{2}[\s_\-]+[A-Z]{2,4}[\s_\-]+\d{1,4})\b",
         re.IGNORECASE,
     )
     try:
+        text = ""
         with pdfplumber.open(file_path) as pdf:
-            text = pdf.pages[0].extract_text() or ""
-            for line in text.splitlines():
-                if student_name == "Unknown":
-                    m = name_pattern.search(line)
-                    if m:
-                        student_name = m.group(1).strip()
-                if reg_no == "Unknown":
-                    m = reg_pattern.search(line)
-                    if m:
-                        reg_no = m.group(1).strip()
-                if student_name != "Unknown" and reg_no != "Unknown":
-                    break
+            if len(pdf.pages) > 0:
+                text = pdf.pages[0].extract_text() or ""
+
+        # If image-only scanned PDF without embedded text, OCR the header strip
+        if not text.strip():
+            try:
+                import fitz
+                import numpy as np
+                from services.ocr_service import get_paddle_ocr
+
+                doc = fitz.open(file_path)
+                if len(doc) > 0:
+                    page = doc[0]
+                    header_rect = fitz.Rect(0, 0, page.rect.width, page.rect.height * 0.22)
+                    pix = page.get_pixmap(clip=header_rect, matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+                    img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+                    doc.close()
+                    ocr = get_paddle_ocr()
+                    if hasattr(ocr, "predict"):
+                        res = list(ocr.predict(img_np))
+                        lines_ocr = []
+                        for item in res:
+                            if hasattr(item, "get"):
+                                lines_ocr.extend(item.get("rec_texts", []) or [])
+                        text = "\n".join(str(t) for t in lines_ocr)
+                    else:
+                        res = ocr.ocr(img_np) or []
+                        lines_ocr = []
+                        for page_res in res:
+                            for line in page_res or []:
+                                if line and len(line) >= 2 and isinstance(line[1], (list, tuple)):
+                                    lines_ocr.append(str(line[1][0]))
+                        text = "\n".join(lines_ocr)
+                else:
+                    doc.close()
+            except Exception as ocr_err:
+                print(f"[pdf_parser] header OCR fallback skipped: {ocr_err}")
+
+        for line in text.splitlines():
+            if student_name == "Unknown":
+                m = name_pattern.search(line)
+                if m:
+                    student_name = m.group(1).strip()
+            if reg_no == "Unknown":
+                m = reg_pattern.search(line)
+                if m:
+                    reg_no = m.group(1).strip().upper()
+            if student_name != "Unknown" and reg_no != "Unknown":
+                break
+
+        if reg_no == "Unknown" and text:
+            m_inline = roll_inline_pattern.search(text)
+            if m_inline:
+                reg_no = re.sub(r"[\s_]+", "-", m_inline.group(1).upper())
     except Exception as e:
         print(f"[pdf_parser] extract_student_info error: {e}")
 

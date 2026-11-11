@@ -15,6 +15,8 @@ import {
   Trash2,
   Cloud,
   Cpu,
+  CheckSquare,
+  ScanLine,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -90,7 +92,12 @@ function UploadSheetsContent() {
   const [error, setError] = useState('');
   const [successCount, setSuccessCount] = useState(0);
   const [deletingSheetId, setDeletingSheetId] = useState<string | null>(null);
-  const [ocrEngine, setOcrEngine] = useState<OcrEngine>('trocr');
+  const [paperType, setPaperType] = useState<'theory' | 'mcq'>('theory');
+  const [theoryOcrEngine, setTheoryOcrEngine] = useState<'trocr' | 'pen_to_print'>('trocr');
+  const [pendingOmrRedirect, setPendingOmrRedirect] = useState(false);
+  const autoDetectedExamRef = useRef<string>('');
+
+  const ocrEngine: OcrEngine = paperType === 'mcq' ? 'omr' : theoryOcrEngine;
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -110,8 +117,21 @@ function UploadSheetsContent() {
     examApi.getAll().then(setExams).catch(() => setExams([]));
   }, []);
 
+  // Auto-detect MCQ vs Theory paper type once when exam data is available
+  useEffect(() => {
+    if (!selectedExamId || autoDetectedExamRef.current === selectedExamId) return;
+    const matchedExam = exams.find((item) => item.id === selectedExamId);
+    if (!matchedExam) return;
+    autoDetectedExamRef.current = selectedExamId;
+    if (matchedExam.questions?.length) {
+      const allMcq = matchedExam.questions.every((q) => q.type === 'mcq');
+      setPaperType(allMcq ? 'mcq' : 'theory');
+    }
+  }, [selectedExamId, exams]);
+
   // Load sheets when exam selected
   useEffect(() => {
+    setPendingOmrRedirect(false);
     if (!selectedExamId) return;
     setLoadingSheets(true);
     setSheets([]);
@@ -177,12 +197,22 @@ function UploadSheetsContent() {
           setSelectedSheetId((currentId) =>
             getNextPreviewSheetId(loadedSheets, currentId),
           );
+          if (
+            pendingOmrRedirect &&
+            !loadedSheets.some(
+              (s) => s.status === 'processing' || s.status === 'uploaded',
+            ) &&
+            loadedSheets.some((s) => s.status === 'awaiting_approval')
+          ) {
+            setPendingOmrRedirect(false);
+            router.push(`/dashboard/ai-review?examId=${selectedExamId}`);
+          }
         })
         .catch(() => {});
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [selectedExamId, sheets]);
+  }, [selectedExamId, sheets, pendingOmrRedirect, router]);
 
   const handleFiles = async (files: FileList | File[]) => {
     const fileArray = Array.from(files).filter(
@@ -234,6 +264,10 @@ function UploadSheetsContent() {
     setError('');
 
     try {
+      const isOmrRun =
+        paperType === 'mcq' ||
+        sheets.some((s) => s.status === 'uploaded' && s.ocrEngine === 'omr');
+
       // Trigger evaluation (this will process all uploaded sheets)
       const evaluation = await evaluationApi.triggerEvaluation(selectedExamId, ocrEngine);
       
@@ -243,6 +277,19 @@ function UploadSheetsContent() {
       setSelectedSheetId((currentId) =>
         getNextPreviewSheetId(updated, currentId),
       );
+
+      if (evaluation.started && isOmrRun) {
+        if (
+          !updated.some(
+            (s) => s.status === 'processing' || s.status === 'uploaded',
+          ) &&
+          updated.some((s) => s.status === 'awaiting_approval')
+        ) {
+          router.push(`/dashboard/ai-review?examId=${selectedExamId}`);
+          return;
+        }
+        setPendingOmrRedirect(true);
+      }
 
       setError(
         evaluation.started
@@ -354,83 +401,131 @@ function UploadSheetsContent() {
                   Upload Answer Sheets
                 </h3>
                 <span className="text-[11px] font-medium text-[#777777]">
-                  Select OCR engine
+                  Select paper type &amp; checking mode
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Paper Type Toggle: Theory Paper vs MCQ Paper (OMR Sheet) */}
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F4ECE0] p-1 mb-3">
                 <button
                   type="button"
-                  onClick={() => setOcrEngine('pen_to_print')}
-                  aria-pressed={ocrEngine === 'pen_to_print'}
+                  onClick={() => setPaperType('theory')}
+                  aria-pressed={paperType === 'theory'}
                   className={cn(
-                    'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
-                    ocrEngine === 'pen_to_print'
-                      ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
-                      : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
+                    'flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer',
+                    paperType === 'theory'
+                      ? 'bg-[#005461] text-white shadow-sm'
+                      : 'text-[#555555] hover:text-[#1A1A1A]'
                   )}
                 >
-                  <div
-                    className={cn(
-                      'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
-                      ocrEngine === 'pen_to_print'
-                        ? 'bg-[#FAB963] text-[#1A1A1A]'
-                        : 'bg-[#E4F2F4] text-[#005461]'
-                    )}
-                  >
-                    <Cloud size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold leading-tight truncate">
-                      Perform OCR via API
-                    </p>
-                    <p
-                      className={cn(
-                        'text-[10px] leading-tight truncate mt-0.5',
-                        ocrEngine === 'pen_to_print' ? 'text-[#C8E6EA]' : 'text-[#888888]'
-                      )}
-                    >
-                      Pen to Print Cloud OCR
-                    </p>
-                  </div>
+                  <FileText size={14} />
+                  Theory Paper
                 </button>
-
                 <button
                   type="button"
-                  onClick={() => setOcrEngine('trocr')}
-                  aria-pressed={ocrEngine === 'trocr'}
+                  onClick={() => setPaperType('mcq')}
+                  aria-pressed={paperType === 'mcq'}
                   className={cn(
-                    'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
-                    ocrEngine === 'trocr'
-                      ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
-                      : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
+                    'flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer',
+                    paperType === 'mcq'
+                      ? 'bg-[#005461] text-white shadow-sm'
+                      : 'text-[#555555] hover:text-[#1A1A1A]'
                   )}
                 >
-                  <div
-                    className={cn(
-                      'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
-                      ocrEngine === 'trocr'
-                        ? 'bg-[#FAB963] text-[#1A1A1A]'
-                        : 'bg-[#E4F2F4] text-[#005461]'
-                    )}
-                  >
-                    <Cpu size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold leading-tight truncate">
-                      TrOCR Base Model
-                    </p>
-                    <p
-                      className={cn(
-                        'text-[10px] leading-tight truncate mt-0.5',
-                        ocrEngine === 'trocr' ? 'text-[#C8E6EA]' : 'text-[#888888]'
-                      )}
-                    >
-                      PaddleOCR + Local TrOCR
-                    </p>
-                  </div>
+                  <CheckSquare size={14} />
+                  MCQ Paper (OMR Sheet)
                 </button>
               </div>
+
+              {paperType === 'theory' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setTheoryOcrEngine('pen_to_print')}
+                    aria-pressed={theoryOcrEngine === 'pen_to_print'}
+                    className={cn(
+                      'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
+                      theoryOcrEngine === 'pen_to_print'
+                        ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
+                        : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+                        theoryOcrEngine === 'pen_to_print'
+                          ? 'bg-[#FAB963] text-[#1A1A1A]'
+                          : 'bg-[#E4F2F4] text-[#005461]'
+                      )}
+                    >
+                      <Cloud size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold leading-tight truncate">
+                        Perform OCR via API
+                      </p>
+                      <p
+                        className={cn(
+                          'text-[10px] leading-tight truncate mt-0.5',
+                          theoryOcrEngine === 'pen_to_print' ? 'text-[#C8E6EA]' : 'text-[#888888]'
+                        )}
+                      >
+                        Pen to Print Cloud OCR
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTheoryOcrEngine('trocr')}
+                    aria-pressed={theoryOcrEngine === 'trocr'}
+                    className={cn(
+                      'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
+                      theoryOcrEngine === 'trocr'
+                        ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
+                        : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+                        theoryOcrEngine === 'trocr'
+                          ? 'bg-[#FAB963] text-[#1A1A1A]'
+                          : 'bg-[#E4F2F4] text-[#005461]'
+                      )}
+                    >
+                      <Cpu size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold leading-tight truncate">
+                        TrOCR Base Model
+                      </p>
+                      <p
+                        className={cn(
+                          'text-[10px] leading-tight truncate mt-0.5',
+                          theoryOcrEngine === 'trocr' ? 'text-[#C8E6EA]' : 'text-[#888888]'
+                        )}
+                      >
+                        PaddleOCR + Local TrOCR
+                      </p>
+                    </div>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 rounded-xl border-2 border-[#005461] bg-[#005461] px-3.5 py-2.5 text-white shadow-sm">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[#FAB963] text-[#1A1A1A]">
+                    <ScanLine size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold leading-tight">
+                      OMR Bubble Scanner Active (30-MCQ-V1)
+                    </p>
+                    <p className="text-[10px] leading-tight text-[#C8E6EA] mt-0.5">
+                      Upload multiple MCQ OMR PDFs · Auto-detects Candidate ID, shaded A/B/C/D bubbles &amp; highlights right/wrong answers
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
             <div
           onDragOver={(e) => {
@@ -469,7 +564,9 @@ function UploadSheetsContent() {
                 ? 'Uploading and processing...'
                 : dragOver
                 ? 'Drop files here'
-                : 'Drag & drop answer sheet PDFs here'}
+                : paperType === 'mcq'
+                  ? 'Drag & drop multiple MCQ OMR sheet PDFs here'
+                  : 'Drag & drop answer sheet PDFs here'}
             </p>
             <p className="text-xs text-[#888888] mt-1">
               or click to browse · PDF only · Max 20MB per file · Up to
@@ -656,8 +753,20 @@ function UploadSheetsContent() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap justify-end">
-                        <Badge variant={sheet.ocrEngine === 'pen_to_print' ? 'info' : 'default'}>
-                          {sheet.ocrEngine === 'pen_to_print' ? 'Pen to Print API' : 'TrOCR Model'}
+                        <Badge
+                          variant={
+                            sheet.ocrEngine === 'omr'
+                              ? 'success'
+                              : sheet.ocrEngine === 'pen_to_print'
+                                ? 'info'
+                                : 'default'
+                          }
+                        >
+                          {sheet.ocrEngine === 'omr'
+                            ? 'OMR Scanner'
+                            : sheet.ocrEngine === 'pen_to_print'
+                              ? 'Pen to Print API'
+                              : 'TrOCR Model'}
                         </Badge>
                         <Badge variant={config.variant}>
                           <span className="flex items-center gap-1">

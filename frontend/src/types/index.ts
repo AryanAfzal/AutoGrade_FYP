@@ -250,7 +250,7 @@ export type SheetStatus =
   | 'awaiting_approval'
   | 'approved';
 
-export type OcrEngine = 'trocr' | 'pen_to_print';
+export type OcrEngine = 'trocr' | 'pen_to_print' | 'omr';
 
 export interface AnswerSheet {
   id: string;
@@ -259,6 +259,7 @@ export interface AnswerSheet {
   registrationNo: string;
   filePath: string;
   ocrEngine?: OcrEngine;
+  omrAnnotatedPath?: string | null;
   status: SheetStatus;
   uploadedAt: string;
 }
@@ -291,6 +292,12 @@ export interface AnswerEntry {
   }[] | null;
   conceptScore?: number;
   feedback?: string | null;
+  omrDetails?: {
+    selectedOption: string;
+    correctOption: string;
+    fillRatios: Record<string, number>;
+    status: 'correct' | 'wrong' | 'blank' | 'multiple';
+  } | null;
 }
 
 export interface ReviewAuditEntry {
@@ -313,6 +320,8 @@ export interface StudentResult {
   totalApprovedMark: number | null;
   reviewCompletedAt: string | null;
   status: SheetStatus;
+  ocrEngine?: OcrEngine;
+  hasOmrImage?: boolean;
   entries: AnswerEntry[];
 }
 

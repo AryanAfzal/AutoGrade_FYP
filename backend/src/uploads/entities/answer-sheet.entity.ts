@@ -19,7 +19,10 @@ export class AnswerSheet {
   filePath: string;
 
   @Column({ default: 'trocr' })
-  ocrEngine: 'trocr' | 'pen_to_print';
+  ocrEngine: 'trocr' | 'pen_to_print' | 'omr';
+
+  @Column({ type: 'text', nullable: true })
+  omrAnnotatedPath: string | null;
 
   @Column({ default: 'uploaded' })
   status: 'uploaded' | 'processing' | 'awaiting_approval' | 'approved' | 'flagged' | 'mapped';

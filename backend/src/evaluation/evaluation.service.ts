@@ -19,7 +19,8 @@ import { CreateRecheckRequestDto } from './dto/create-recheck-request.dto';
 import { DecideRecheckRequestDto } from './dto/decide-recheck-request.dto';
 import { User } from '../users/entities/user.entity';
 import axios, { AxiosError, isAxiosError } from 'axios';
-import { existsSync } from 'node:fs';
+import { createReadStream, existsSync, promises as fs } from 'node:fs';
+import * as path from 'node:path';
 
 export interface EvaluationJobStartResult {
   started: boolean;
@@ -49,6 +50,50 @@ export class EvaluationService {
     private notificationRepo: Repository<UserNotification>,
   ) {}
 
+  async getOmrAnnotatedImage(examId: string, sheetId: string, user: User) {
+    await this.getOwnedExam(examId, user);
+    const sheet = await this.sheetRepo.findOne({
+      where: {
+        id: sheetId,
+        exam: { id: examId },
+      },
+    });
+    if (!sheet || !sheet.omrAnnotatedPath) {
+      throw new NotFoundException('Highlighted OMR image is not available for this sheet.');
+    }
+
+    const uploadsDirectory = await fs.realpath(path.resolve(process.cwd(), 'uploads'));
+    const resolvedPath = path.resolve(sheet.omrAnnotatedPath);
+    const relativePath = path.relative(uploadsDirectory, resolvedPath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      throw new NotFoundException('Highlighted OMR image is not available.');
+    }
+
+    let realFilePath: string;
+    try {
+      realFilePath = await fs.realpath(resolvedPath);
+      const realRelativePath = path.relative(uploadsDirectory, realFilePath);
+      if (realRelativePath.startsWith('..') || path.isAbsolute(realRelativePath)) {
+        throw new NotFoundException('Highlighted OMR image is not available.');
+      }
+      const fileInfo = await fs.stat(realFilePath);
+      if (!fileInfo.isFile()) {
+        throw new NotFoundException('Highlighted OMR image is not available.');
+      }
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new NotFoundException('Highlighted OMR image file no longer exists.');
+      }
+      throw error;
+    }
+
+    return {
+      stream: createReadStream(realFilePath),
+      fileName: path.basename(realFilePath),
+    };
+  }
+
   async getResults(examId: string, user: User) {
     const exam = await this.getOwnedExam(examId, user);
     const questionOrder = new Map(
@@ -75,6 +120,8 @@ export class EvaluationService {
       totalApprovedMark: result.totalApprovedMark,
       reviewCompletedAt: result.reviewCompletedAt,
       status: result.status,
+      ocrEngine: result.answerSheet.ocrEngine,
+      hasOmrImage: Boolean(result.answerSheet.omrAnnotatedPath),
       entries: [...result.entries]
         .sort(
           (a, b) =>
@@ -525,14 +572,23 @@ export class EvaluationService {
     for (const sheet of sheets) {
       const startedAt = Date.now();
       try {
-        const resolvedEngine: 'trocr' | 'pen_to_print' =
-          sheet.ocrEngine === 'pen_to_print'
-            ? 'pen_to_print'
-            : sheet.ocrEngine === 'trocr'
-              ? 'trocr'
-              : fallbackOcrEngine === 'pen_to_print'
-                ? 'pen_to_print'
-                : 'trocr';
+        const resolvedEngine: 'trocr' | 'pen_to_print' | 'omr' =
+          sheet.ocrEngine === 'omr'
+            ? 'omr'
+            : sheet.ocrEngine === 'pen_to_print'
+              ? 'pen_to_print'
+              : sheet.ocrEngine === 'trocr'
+                ? 'trocr'
+                : fallbackOcrEngine === 'omr'
+                  ? 'omr'
+                  : fallbackOcrEngine === 'pen_to_print'
+                    ? 'pen_to_print'
+                    : 'trocr';
+
+        const omrOutputPath =
+          resolvedEngine === 'omr'
+            ? path.resolve(process.cwd(), 'uploads', 'omr-annotated', `${sheet.id}.png`)
+            : undefined;
 
         const aiResponse = await axios.post(
           `${process.env.AI_SERVICE_URL}/evaluate`,
@@ -542,11 +598,12 @@ export class EvaluationService {
             examId: exam.id,
             questions: exam.questions,
             ocrEngine: resolvedEngine,
+            ...(omrOutputPath ? { omrOutputPath } : {}),
           },
           { timeout: 300000 },
         );
 
-        const { totalMark, totalMaxMarks, entries } = aiResponse.data;
+        const { totalMark, totalMaxMarks, omrAnnotatedPath, entries } = aiResponse.data;
         const result = this.resultRepo.create({
           answerSheet: sheet,
           totalAiMark: totalMark,
@@ -555,7 +612,10 @@ export class EvaluationService {
           entries,
         });
         await this.resultRepo.save(result);
-        await this.sheetRepo.update(sheet.id, { status: 'awaiting_approval' });
+        await this.sheetRepo.update(sheet.id, {
+          status: 'awaiting_approval',
+          ...(omrAnnotatedPath ? { omrAnnotatedPath } : {}),
+        });
 
         this.logger.log(
           `Evaluated sheet ${sheet.id} - Score: ${totalMark}/${totalMaxMarks} in ${Math.round((Date.now() - startedAt) / 1000)}s.`,

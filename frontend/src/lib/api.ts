@@ -586,6 +586,17 @@ export const evaluationApi = {
     return handleResponse<import('@/types').SimilarityFlag[]>(res);
   },
 
+  getOmrImage: async (examId: string, sheetId: string, signal?: AbortSignal) => {
+    const res = await fetch(`${BASE_URL}/evaluation/${examId}/sheets/${sheetId}/omr-image`, {
+      headers: authHeaders(),
+      signal,
+    });
+    if (!res.ok) {
+      return handleResponse<Blob>(res);
+    }
+    return res.blob();
+  },
+
   reviewAnswerEntry: async (
     examId: string,
     entryId: string,
