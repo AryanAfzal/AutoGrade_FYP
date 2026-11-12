@@ -175,7 +175,7 @@ export default function Home() {
         <div className="hero-grid">
           <div className="hero-copy">
             <h1 className="reveal-one">
-              Grade exams faster.
+              AutoGrade exams.
               <br />
               <span>Teach with confidence.</span>
             </h1>
