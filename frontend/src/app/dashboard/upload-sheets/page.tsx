@@ -13,8 +13,6 @@ import {
   X,
   ChevronDown,
   Trash2,
-  Cloud,
-  Cpu,
   CheckSquare,
   ScanLine,
 } from 'lucide-react';
@@ -93,11 +91,10 @@ function UploadSheetsContent() {
   const [successCount, setSuccessCount] = useState(0);
   const [deletingSheetId, setDeletingSheetId] = useState<string | null>(null);
   const [paperType, setPaperType] = useState<'theory' | 'mcq'>('theory');
-  const [theoryOcrEngine, setTheoryOcrEngine] = useState<'trocr' | 'pen_to_print'>('trocr');
   const [pendingOmrRedirect, setPendingOmrRedirect] = useState(false);
   const autoDetectedExamRef = useRef<string>('');
 
-  const ocrEngine: OcrEngine = paperType === 'mcq' ? 'omr' : theoryOcrEngine;
+  const ocrEngine: OcrEngine = paperType === 'mcq' ? 'omr' : 'pen_to_print';
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -401,7 +398,7 @@ function UploadSheetsContent() {
                   Upload Answer Sheets
                 </h3>
                 <span className="text-[11px] font-medium text-[#777777]">
-                  Select paper type &amp; checking mode
+                  Select paper type
                 </span>
               </div>
 
@@ -437,81 +434,7 @@ function UploadSheetsContent() {
                 </button>
               </div>
 
-              {paperType === 'theory' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setTheoryOcrEngine('pen_to_print')}
-                    aria-pressed={theoryOcrEngine === 'pen_to_print'}
-                    className={cn(
-                      'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
-                      theoryOcrEngine === 'pen_to_print'
-                        ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
-                        : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
-                        theoryOcrEngine === 'pen_to_print'
-                          ? 'bg-[#FAB963] text-[#1A1A1A]'
-                          : 'bg-[#E4F2F4] text-[#005461]'
-                      )}
-                    >
-                      <Cloud size={16} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold leading-tight truncate">
-                        Perform OCR via API
-                      </p>
-                      <p
-                        className={cn(
-                          'text-[10px] leading-tight truncate mt-0.5',
-                          theoryOcrEngine === 'pen_to_print' ? 'text-[#C8E6EA]' : 'text-[#888888]'
-                        )}
-                      >
-                        Pen to Print Cloud OCR
-                      </p>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setTheoryOcrEngine('trocr')}
-                    aria-pressed={theoryOcrEngine === 'trocr'}
-                    className={cn(
-                      'flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left transition-all duration-200 cursor-pointer active:scale-[0.98]',
-                      theoryOcrEngine === 'trocr'
-                        ? 'border-[#005461] bg-[#005461] text-white shadow-sm'
-                        : 'border-[#E8DCC8] bg-white text-[#1A1A1A] hover:border-[#005461]/60 hover:bg-[#FFFDF8]'
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
-                        theoryOcrEngine === 'trocr'
-                          ? 'bg-[#FAB963] text-[#1A1A1A]'
-                          : 'bg-[#E4F2F4] text-[#005461]'
-                      )}
-                    >
-                      <Cpu size={16} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold leading-tight truncate">
-                        TrOCR Base Model
-                      </p>
-                      <p
-                        className={cn(
-                          'text-[10px] leading-tight truncate mt-0.5',
-                          theoryOcrEngine === 'trocr' ? 'text-[#C8E6EA]' : 'text-[#888888]'
-                        )}
-                      >
-                        PaddleOCR + Local TrOCR
-                      </p>
-                    </div>
-                  </button>
-                </div>
-              ) : (
+              {paperType === 'mcq' && (
                 <div className="flex items-center gap-3 rounded-xl border-2 border-[#005461] bg-[#005461] px-3.5 py-2.5 text-white shadow-sm">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[#FAB963] text-[#1A1A1A]">
                     <ScanLine size={16} />
@@ -753,20 +676,8 @@ function UploadSheetsContent() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap justify-end">
-                        <Badge
-                          variant={
-                            sheet.ocrEngine === 'omr'
-                              ? 'success'
-                              : sheet.ocrEngine === 'pen_to_print'
-                                ? 'info'
-                                : 'default'
-                          }
-                        >
-                          {sheet.ocrEngine === 'omr'
-                            ? 'OMR Scanner'
-                            : sheet.ocrEngine === 'pen_to_print'
-                              ? 'Pen to Print API'
-                              : 'TrOCR Model'}
+                        <Badge variant={sheet.ocrEngine === 'omr' ? 'success' : 'default'}>
+                          {sheet.ocrEngine === 'omr' ? 'OMR Scanner' : 'TrOCR Model'}
                         </Badge>
                         <Badge variant={config.variant}>
                           <span className="flex items-center gap-1">
