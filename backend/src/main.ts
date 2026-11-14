@@ -10,7 +10,7 @@ async function bootstrap() {
   app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
   app.enableCors({
-    origin: 'http://localhost:3000', // Next.js frontend
+    origin: true,
     credentials: true,
   });
 
