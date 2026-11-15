@@ -209,11 +209,9 @@ export default function LoginPage() {
 
           {selectedRole === 'admin' && (
             <div className="login-admin-notice rounded-xl border border-[#E8DCC8] bg-white px-4 py-3 text-xs text-[#555555]">
-              <p className="font-semibold text-[#005461]">Predefined Administrator Accounts</p>
+              <p className="font-semibold text-[#005461]">Administrator Account</p>
               <p className="mt-0.5">
-                Authorized emails: <code className="font-mono">admin1@cuiwah.edu.pk</code>,{' '}
-                <code className="font-mono">admin2@cuiwah.edu.pk</code>,{' '}
-                <code className="font-mono">admin3@cuiwah.edu.pk</code>
+                Authorized email: <code className="font-mono">admin@academy.com</code>
               </p>
             </div>
           )}
@@ -234,7 +232,7 @@ export default function LoginPage() {
               type="email"
               placeholder={
                 selectedRole === 'admin'
-                  ? 'admin1@cuiwah.edu.pk'
+                  ? 'admin@academy.com'
                   : 'you@cuiwah.edu.pk'
               }
               error={errors.email?.message}

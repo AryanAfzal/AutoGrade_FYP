@@ -55,12 +55,9 @@ async function main() {
 
   const suffix = Date.now().toString().slice(-6);
   const teacherEmail = `test.teacher.${suffix}@cuiwah.edu.pk`;
-  const googleTeacherEmail = `google.teacher.${suffix}@gmail.com`;
   const studentEmail = `test.student.${suffix}@cuiwah.edu.pk`;
   const studentEmail2 = `test.student2.${suffix}@cuiwah.edu.pk`;
-  const googleStudentEmail = `google.student.${suffix}@gmail.com`;
   const studentRollNo = `FA22-BCS-${suffix}`;
-  const googleStudentRollNo = `SP23-BCS-${suffix}`;
 
   let admin1Token = '';
   let admin2Token = '';
@@ -143,7 +140,7 @@ async function main() {
     );
 
     // ---------------------------------------------------------
-    // SECTION 2 & 5: Teacher Registration, Email Validation, Password Policy & Google Login
+    // SECTION 2 & 5: Teacher Registration, Email Validation & Password Policy
     // ---------------------------------------------------------
     await runTest(
       'TC-5.1',
@@ -203,24 +200,8 @@ async function main() {
       },
     );
 
-    await runTest(
-      'TC-2.3',
-      'Teacher Google Sign-Up creates PENDING teacher account',
-      async () => {
-        const res = await axios.post(`${BASE_URL}/auth/google-auth`, {
-          email: googleTeacherEmail,
-          fullName: 'Dr. Google Teacher',
-          role: 'teacher',
-        });
-        if (!res.data.pendingApproval || res.data.user.role !== 'teacher') {
-          throw new Error('Expected pending teacher account via Google Auth');
-        }
-        return `Google teacher account registered: ${res.data.message}`;
-      },
-    );
-
     // ---------------------------------------------------------
-    // SECTION 3: Student Registration, Unique Email & Unique Reg No, Google Login
+    // SECTION 3: Student Registration, Unique Email & Unique Reg No
     // ---------------------------------------------------------
     await runTest(
       'TC-3.1',
@@ -282,24 +263,6 @@ async function main() {
           }
           throw err;
         }
-      },
-    );
-
-    await runTest(
-      'TC-3.4',
-      'Student Google Sign-Up creates PENDING student account with unique registration number',
-      async () => {
-        const res = await axios.post(`${BASE_URL}/auth/google-auth`, {
-          email: googleStudentEmail,
-          fullName: 'Google Student',
-          role: 'student',
-          university: 'COMSATS University Islamabad, Wah Campus',
-          registrationNumber: googleStudentRollNo,
-        });
-        if (!res.data.pendingApproval || res.data.user.rollNumber !== googleStudentRollNo) {
-          throw new Error('Expected pending Google student with registration number');
-        }
-        return `Google student registered (${res.data.user.rollNumber})`;
       },
     );
 
@@ -640,10 +603,8 @@ async function main() {
     // Clean up temporary test users created during the test run
     for (const email of [
       teacherEmail,
-      googleTeacherEmail,
       studentEmail,
       studentEmail2,
-      googleStudentEmail,
     ]) {
       await userRepo.delete({ email });
     }

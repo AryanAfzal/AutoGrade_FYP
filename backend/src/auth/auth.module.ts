@@ -12,17 +12,30 @@ import { StudentEnrollment } from '../users/entities/student-enrollment.entity';
 import { Exam } from '../exams/entities/exam.entity';
 import { Course } from '../institutions/entities/course.entity';
 import { Department } from '../institutions/entities/department.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
 
 @Module({
   imports: [
     UsersModule,
-    TypeOrmModule.forFeature([StudentEnrollment, Exam, Course, Department]),
+    TypeOrmModule.forFeature([
+      StudentEnrollment,
+      Exam,
+      Course,
+      Department,
+      RefreshToken,
+    ]),
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET') || 'development-secret',
-        signOptions: { expiresIn: (configService.get<string>('JWT_EXPIRES_IN') || '7d') as any },
+        signOptions: {
+          expiresIn: (
+            configService.get<string>('JWT_ACCESS_EXPIRES_IN') ||
+            configService.get<string>('JWT_EXPIRES_IN') ||
+            '15m'
+          ) as any,
+        },
       }),
     }),
   ],
