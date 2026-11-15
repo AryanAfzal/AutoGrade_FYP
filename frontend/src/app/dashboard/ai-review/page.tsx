@@ -88,9 +88,16 @@ function AIReviewContent() {
         setExam(examData);
         setRecheckDeadline('');
         if (examData.recheckDeadline) {
-          const localDate = new Date(examData.recheckDeadline);
-          localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
-          setRecheckDeadline(localDate.toISOString().slice(0, 16));
+          const isPast = new Date(examData.recheckDeadline).getTime() <= Date.now();
+          const targetDate = isPast
+            ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+            : new Date(examData.recheckDeadline);
+          targetDate.setMinutes(targetDate.getMinutes() - targetDate.getTimezoneOffset());
+          setRecheckDeadline(targetDate.toISOString().slice(0, 16));
+        } else {
+          const defaultFuture = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+          defaultFuture.setMinutes(defaultFuture.getMinutes() - defaultFuture.getTimezoneOffset());
+          setRecheckDeadline(defaultFuture.toISOString().slice(0, 16));
         }
         const awaiting = resultsData.filter((r) => r.status === 'awaiting_approval');
         setResults(awaiting);
@@ -176,11 +183,40 @@ function AIReviewContent() {
   };
 
   const handlePublish = async () => {
-    if (!examId || !canPublish) return;
-    if (!window.confirm('Publish all papers marked done for this exam to students?')) return;
-    setPublishing(true);
-    setError('');
-    setNotice('');
+    if (!examId || !hasDonePapers) return;
+
+    if (!isDeadlineValid) {
+      const shouldAutoExtend = window.confirm(
+        'The student recheck deadline has passed (or is not set). Would you like to automatically extend the deadline by 7 days from now and publish results immediately?'
+      );
+      if (!shouldAutoExtend) return;
+
+      setPublishing(true);
+      setError('');
+      setNotice('');
+      try {
+        const autoDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        const updatedExam = await examApi.updateRecheckDeadline(examId, autoDeadline.toISOString());
+        setExam(updatedExam);
+        const localDate = new Date(autoDeadline);
+        localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+        setRecheckDeadline(localDate.toISOString().slice(0, 16));
+      } catch (deadlineError: unknown) {
+        setError(
+          deadlineError instanceof Error
+            ? deadlineError.message
+            : 'Unable to update recheck deadline prior to publishing.',
+        );
+        setPublishing(false);
+        return;
+      }
+    } else {
+      if (!window.confirm('Publish all papers marked done for this exam to students?')) return;
+      setPublishing(true);
+      setError('');
+      setNotice('');
+    }
+
     try {
       const result = await evaluationApi.publishResults(examId);
       const refreshedResults = await evaluationApi.getResults(examId);
@@ -202,6 +238,26 @@ function AIReviewContent() {
       );
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const handleQuickExtendDeadline = async (days = 7) => {
+    if (!examId) return;
+    setSavingDeadline(true);
+    setError('');
+    setNotice('');
+    try {
+      const newDeadline = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      const updatedExam = await examApi.updateRecheckDeadline(examId, newDeadline.toISOString());
+      setExam(updatedExam);
+      const localDate = new Date(newDeadline);
+      localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+      setRecheckDeadline(localDate.toISOString().slice(0, 16));
+      setNotice(`Student recheck deadline extended to ${days} days from now.`);
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to extend deadline.');
+    } finally {
+      setSavingDeadline(false);
     }
   };
 
@@ -322,10 +378,12 @@ function AIReviewContent() {
     }
   };
 
-  const canPublish =
-    results.some((result) => !!result.reviewCompletedAt) &&
-    !!exam?.recheckDeadline &&
-    new Date(exam.recheckDeadline).getTime() > Date.now();
+  const doneCount = results.filter((result) => !!result.reviewCompletedAt).length;
+  const hasDonePapers = doneCount > 0;
+  const isDeadlineSet = !!exam?.recheckDeadline;
+  const isDeadlineExpired = !!exam?.recheckDeadline && new Date(exam.recheckDeadline).getTime() <= Date.now();
+  const isDeadlineValid = isDeadlineSet && !isDeadlineExpired;
+  const canPublish = hasDonePapers && isDeadlineValid;
 
   // Check if a student is involved in a high-similarity flag
   const studentHasSimilarity = (studentName: string) =>
@@ -365,15 +423,22 @@ function AIReviewContent() {
               Approve or override each question before publishing · {results.length} submission(s) pending
             </p>
           </div>
-          <Button
-            variant="primary"
-            onClick={handlePublish}
-            loading={publishing}
-            disabled={!canPublish || publishing}
-          >
-            <CheckCircle2 size={14} className="mr-2" />
-            Publish done papers ({results.filter((result) => !!result.reviewCompletedAt).length})
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              variant="primary"
+              onClick={handlePublish}
+              loading={publishing}
+              disabled={!hasDonePapers || publishing}
+            >
+              <CheckCircle2 size={14} className="mr-2" />
+              Publish done papers ({doneCount})
+            </Button>
+            {hasDonePapers && !isDeadlineValid && (
+              <span className="text-[11px] text-amber-700 font-medium">
+                {isDeadlineExpired ? '⚠️ Deadline expired (will extend & publish)' : '⚠️ Deadline needed (will set & publish)'}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -395,28 +460,51 @@ function AIReviewContent() {
             </Badge>
           </div>
           <div className="mt-5 flex flex-col gap-3 border-t border-[#E8DCC8] pt-4 sm:flex-row sm:items-end">
-            <Input
-              label="Student recheck deadline"
-              type="datetime-local"
-              value={recheckDeadline}
-              onChange={(event) => setRecheckDeadline(event.target.value)}
-              hint={exam.recheckDeadline
-                ? `Current deadline: ${new Date(exam.recheckDeadline).toLocaleString()}`
-                : 'Set a deadline so students know how long they have to request a recheck.'}
-            />
-            <Button
-              variant="secondary"
-              loading={savingDeadline}
-              disabled={savingDeadline || !recheckDeadline}
-              onClick={handleSaveDeadline}
-            >
-              Save deadline
-            </Button>
+            <div className="flex-1">
+              <Input
+                label="Student recheck deadline"
+                type="datetime-local"
+                value={recheckDeadline}
+                onChange={(event) => setRecheckDeadline(event.target.value)}
+                hint={exam.recheckDeadline
+                  ? `Current deadline: ${new Date(exam.recheckDeadline).toLocaleString()}`
+                  : 'Set a deadline so students know how long they have to request a recheck.'}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                loading={savingDeadline}
+                disabled={savingDeadline || !recheckDeadline}
+                onClick={handleSaveDeadline}
+              >
+                Save deadline
+              </Button>
+              <Button
+                variant="secondary"
+                loading={savingDeadline}
+                disabled={savingDeadline}
+                onClick={() => handleQuickExtendDeadline(7)}
+              >
+                Set 7 days from now
+              </Button>
+            </div>
           </div>
-          {!exam.recheckDeadline && (
-            <p className="mt-2 text-xs text-amber-800">
-              A future recheck deadline is required before results can be published.
-            </p>
+          {isDeadlineExpired && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+              <AlertCircle size={15} className="shrink-0 text-amber-600" />
+              <span>
+                <strong>Deadline Expired:</strong> The current deadline was {new Date(exam.recheckDeadline!).toLocaleString()}. Click &quot;Set 7 days from now&quot; or click &quot;Publish done papers&quot; to auto-extend and publish immediately.
+              </span>
+            </div>
+          )}
+          {!isDeadlineSet && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+              <AlertCircle size={15} className="shrink-0 text-amber-600" />
+              <span>
+                A future recheck deadline is required before results can be published.
+              </span>
+            </div>
           )}
         </Card>
       )}
