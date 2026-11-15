@@ -67,6 +67,55 @@ function authHeaders(): HeadersInit {
   };
 }
 
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const options = { ...init, credentials: 'include' as RequestCredentials };
+  const response = await globalThis.fetch(input, options);
+  const publicAuthEndpoint = [
+    '/auth/login',
+    '/auth/refresh',
+    '/auth/logout',
+    '/auth/register/',
+    '/auth/forgot-password',
+    '/auth/reset-password',
+  ].some((path) => url.includes(path));
+
+  if (response.status !== 401 || publicAuthEndpoint || !getToken()) {
+    return response;
+  }
+
+  if (!refreshInFlight) {
+    refreshInFlight = globalThis.fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then(async (refreshResponse) => {
+        if (!refreshResponse.ok) return null;
+        const refreshed = (await refreshResponse.json()) as {
+          token: string;
+          rememberMe: boolean;
+          user: User;
+        };
+        saveAuthSession(refreshed.token, refreshed.user, refreshed.rememberMe);
+        return refreshed.token;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+
+  const token = await refreshInFlight;
+  if (!token) return response;
+
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  headers.set('Authorization', `Bearer ${token}`);
+  return globalThis.fetch(input, { ...options, headers });
+}
+
 async function handleResponse<T>(res: Response, isAuthEndpoint = false): Promise<T> {
   if (!res.ok) {
     if (res.status === 401 && !isAuthEndpoint && typeof window !== 'undefined') {
@@ -86,7 +135,7 @@ async function handleResponse<T>(res: Response, isAuthEndpoint = false): Promise
 
 export const authApi = {
   getCurrentUser: async () => {
-    const res = await fetch(`${BASE_URL}/auth/me`, {
+    const res = await apiFetch(`${BASE_URL}/auth/me`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').User>(res);
@@ -98,7 +147,7 @@ export const authApi = {
     role: 'teacher' | 'admin' | 'student' = 'teacher',
     rememberMe = true,
   ) => {
-    const res = await fetch(`${BASE_URL}/auth/login`, {
+    const res = await apiFetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, role, rememberMe }),
@@ -111,40 +160,8 @@ export const authApi = {
     }>(res, true);
   },
 
-  googleAdminLogin: async (email: string, emailVerified: boolean) => {
-    const res = await fetch(`${BASE_URL}/auth/google-admin-login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, emailVerified }),
-    });
-    return handleResponse<{ token: string; user: import('@/types').User }>(res, true);
-  },
-
-  googleAuth: async (payload: {
-    idToken?: string;
-    email?: string;
-    fullName?: string;
-    profilePicture?: string;
-    role: 'teacher' | 'student' | 'admin';
-    university?: string;
-    registrationNumber?: string;
-    rememberMe?: boolean;
-  }) => {
-    const res = await fetch(`${BASE_URL}/auth/google-auth`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return handleResponse<{
-      token?: string;
-      pendingApproval?: boolean;
-      message?: string;
-      user: import('@/types').User;
-    }>(res, true);
-  },
-
   forgotPassword: async (email: string) => {
-    const res = await fetch(`${BASE_URL}/auth/forgot-password`, {
+    const res = await apiFetch(`${BASE_URL}/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
@@ -162,7 +179,7 @@ export const authApi = {
     newPassword: string;
     confirmPassword: string;
   }) => {
-    const res = await fetch(`${BASE_URL}/auth/reset-password`, {
+    const res = await apiFetch(`${BASE_URL}/auth/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -180,7 +197,7 @@ export const authApi = {
     registrationNumber?: string;
     profilePicture?: string;
   }) => {
-    const res = await fetch(`${BASE_URL}/auth/profile`, {
+    const res = await apiFetch(`${BASE_URL}/auth/profile`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify(payload),
@@ -192,7 +209,7 @@ export const authApi = {
     const formData = new FormData();
     formData.append('file', file);
     const token = getToken();
-    const res = await fetch(`${BASE_URL}/auth/profile/picture`, {
+    const res = await apiFetch(`${BASE_URL}/auth/profile/picture`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -207,7 +224,7 @@ export const authApi = {
     newPassword: string;
     confirmPassword: string;
   }) => {
-    const res = await fetch(`${BASE_URL}/auth/change-password`, {
+    const res = await apiFetch(`${BASE_URL}/auth/change-password`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify(payload),
@@ -222,7 +239,7 @@ export const authApi = {
     registrationNumber: string;
     password: string;
   }) => {
-    const res = await fetch(`${BASE_URL}/auth/register/student`, {
+    const res = await apiFetch(`${BASE_URL}/auth/register/student`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -239,7 +256,7 @@ export const authApi = {
     department?: string;
     qualification?: string;
   }) => {
-    const res = await fetch(`${BASE_URL}/auth/register/teacher`, {
+    const res = await apiFetch(`${BASE_URL}/auth/register/teacher`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -248,14 +265,14 @@ export const authApi = {
   },
 
   getTeacherApplications: async () => {
-    const res = await fetch(`${BASE_URL}/auth/teacher-applications`, {
+    const res = await apiFetch(`${BASE_URL}/auth/teacher-applications`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').TeacherApplication[]>(res);
   },
 
   getStudentApplications: async () => {
-    const res = await fetch(`${BASE_URL}/auth/student-applications`, {
+    const res = await apiFetch(`${BASE_URL}/auth/student-applications`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').StudentApplication[]>(res);
@@ -267,7 +284,7 @@ export const authApi = {
     rollNumber?: string,
     reason?: string,
   ) => {
-    const res = await fetch(`${BASE_URL}/auth/student-applications/${id}`, {
+    const res = await apiFetch(`${BASE_URL}/auth/student-applications/${id}`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify({ status, rollNumber, reason }),
@@ -288,7 +305,7 @@ export const authApi = {
     status: 'APPROVED' | 'REJECTED',
     reason?: string,
   ) => {
-    const res = await fetch(`${BASE_URL}/auth/teacher-applications/${id}`, {
+    const res = await apiFetch(`${BASE_URL}/auth/teacher-applications/${id}`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify({ status, reason }),
@@ -297,7 +314,7 @@ export const authApi = {
   },
 
   assignTeacherSubjects: async (id: string, subjects: string[]) => {
-    const res = await fetch(`${BASE_URL}/auth/teachers/${id}/subjects`, {
+    const res = await apiFetch(`${BASE_URL}/auth/teachers/${id}/subjects`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify({ subjects }),
@@ -311,14 +328,14 @@ export const authApi = {
   },
 
   getTeacherRequests: async () => {
-    const res = await fetch(`${BASE_URL}/auth/teacher-requests`, {
+    const res = await apiFetch(`${BASE_URL}/auth/teacher-requests`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').TeacherEnrollmentRequest[]>(res);
   },
 
   getEnrollmentOptions: async () => {
-    const res = await fetch(`${BASE_URL}/auth/enrollment-options`, {
+    const res = await apiFetch(`${BASE_URL}/auth/enrollment-options`, {
       headers: authHeaders(),
     });
     return handleResponse<{
@@ -329,7 +346,7 @@ export const authApi = {
   },
 
   createStudentEnrollment: async (teacherId: string, subject: string) => {
-    const res = await fetch(`${BASE_URL}/auth/enrollments`, {
+    const res = await apiFetch(`${BASE_URL}/auth/enrollments`, {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ teacherId, subject }),
@@ -338,7 +355,7 @@ export const authApi = {
   },
 
   updateTeacherRequest: async (id: string, status: 'APPROVED' | 'REJECTED', reason?: string) => {
-    const res = await fetch(`${BASE_URL}/auth/teacher-requests/${id}`, {
+    const res = await apiFetch(`${BASE_URL}/auth/teacher-requests/${id}`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify({ status, reason }),
@@ -347,14 +364,14 @@ export const authApi = {
   },
 
   getPublishedStudentResults: async () => {
-    const res = await fetch(`${BASE_URL}/student/results`, {
+    const res = await apiFetch(`${BASE_URL}/student/results`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').PublishedStudentResult[]>(res);
   },
 
   createRecheckRequest: async (answerEntryId: string, justification: string) => {
-    const res = await fetch(`${BASE_URL}/student/recheck-requests`, {
+    const res = await apiFetch(`${BASE_URL}/student/recheck-requests`, {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ answerEntryId, justification }),
@@ -363,14 +380,14 @@ export const authApi = {
   },
 
   getNotifications: async () => {
-    const res = await fetch(`${BASE_URL}/student/notifications`, {
+    const res = await apiFetch(`${BASE_URL}/student/notifications`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').UserNotification[]>(res);
   },
 
   markNotificationRead: async (id: string) => {
-    const res = await fetch(`${BASE_URL}/student/notifications/${id}/read`, {
+    const res = await apiFetch(`${BASE_URL}/student/notifications/${id}/read`, {
       method: 'PATCH',
       headers: authHeaders(),
     });
@@ -378,13 +395,7 @@ export const authApi = {
   },
 
   logout: () => {
-    const token = getToken();
-    if (token) {
-      fetch(`${BASE_URL}/auth/logout`, {
-        method: 'POST',
-        headers: authHeaders(),
-      }).catch(() => {});
-    }
+    apiFetch(`${BASE_URL}/auth/logout`, { method: 'POST' }).catch(() => {});
     clearAuthSession();
   },
 };
@@ -392,7 +403,7 @@ export const authApi = {
 async function institutionRequest<T>(path: string, options: RequestInit = {}) {
   const method = options.method || 'GET';
   try {
-    const res = await fetch(`${BASE_URL}/institutions${path}`, {
+    const res = await apiFetch(`${BASE_URL}/institutions${path}`, {
       ...options,
       headers: {
         ...authHeaders(),
@@ -456,7 +467,7 @@ export const examApi = {
     recheckDeadline: string;
     questions: import('@/types').Question[];
   }) => {
-    const res = await fetch(`${BASE_URL}/exams`, {
+    const res = await apiFetch(`${BASE_URL}/exams`, {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify(data),
@@ -465,7 +476,7 @@ export const examApi = {
   },
 
   updateRecheckDeadline: async (id: string, recheckDeadline: string) => {
-    const res = await fetch(`${BASE_URL}/exams/${id}/recheck-deadline`, {
+    const res = await apiFetch(`${BASE_URL}/exams/${id}/recheck-deadline`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify({ recheckDeadline }),
@@ -474,21 +485,21 @@ export const examApi = {
   },
 
   getAll: async () => {
-    const res = await fetch(`${BASE_URL}/exams`, {
+    const res = await apiFetch(`${BASE_URL}/exams`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').Exam[]>(res);
   },
 
   getById: async (id: string) => {
-    const res = await fetch(`${BASE_URL}/exams/${id}`, {
+    const res = await apiFetch(`${BASE_URL}/exams/${id}`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').Exam>(res);
   },
 
   delete: async (id: string) => {
-    const res = await fetch(`${BASE_URL}/exams/${id}`, {
+    const res = await apiFetch(`${BASE_URL}/exams/${id}`, {
       method: 'DELETE',
       headers: authHeaders(),
     });
@@ -499,7 +510,7 @@ export const examApi = {
     const formData = new FormData();
     formData.append('file', file);
     const token = getToken();
-    const res = await fetch(`${BASE_URL}/exams/parse-pdf`, {
+    const res = await apiFetch(`${BASE_URL}/exams/parse-pdf`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -520,7 +531,7 @@ export const uploadApi = {
     files.forEach((file) => formData.append('files', file));
     formData.append('ocrEngine', ocrEngine);
     const token = getToken();
-    const res = await fetch(`${BASE_URL}/uploads/${examId}`, {
+    const res = await apiFetch(`${BASE_URL}/uploads/${examId}`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -531,14 +542,14 @@ export const uploadApi = {
   },
 
   getSheets: async (examId: string) => {
-    const res = await fetch(`${BASE_URL}/uploads/${examId}`, {
+    const res = await apiFetch(`${BASE_URL}/uploads/${examId}`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').AnswerSheet[]>(res);
   },
 
   getSheetPdf: async (examId: string, sheetId: string, signal?: AbortSignal) => {
-    const res = await fetch(`${BASE_URL}/uploads/${examId}/${sheetId}/file`, {
+    const res = await apiFetch(`${BASE_URL}/uploads/${examId}/${sheetId}/file`, {
       headers: authHeaders(),
       signal,
     });
@@ -549,7 +560,7 @@ export const uploadApi = {
   },
 
   deleteSheet: async (examId: string, sheetId: string) => {
-    const res = await fetch(`${BASE_URL}/uploads/${examId}/${sheetId}`, {
+    const res = await apiFetch(`${BASE_URL}/uploads/${examId}/${sheetId}`, {
       method: 'DELETE',
       headers: authHeaders(),
     });
@@ -562,7 +573,7 @@ export const evaluationApi = {
     examId: string,
     ocrEngine?: import('@/types').OcrEngine,
   ) => {
-    const res = await fetch(`${BASE_URL}/evaluation/${examId}/trigger`, {
+    const res = await apiFetch(`${BASE_URL}/evaluation/${examId}/trigger`, {
       method: 'POST',
       headers: authHeaders(),
       body: ocrEngine ? JSON.stringify({ ocrEngine }) : undefined,
@@ -575,21 +586,21 @@ export const evaluationApi = {
   },
 
   getResults: async (examId: string) => {
-    const res = await fetch(`${BASE_URL}/evaluation/${examId}`, {
+    const res = await apiFetch(`${BASE_URL}/evaluation/${examId}`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').StudentResult[]>(res);
   },
 
   getSimilarityFlags: async (examId: string) => {
-    const res = await fetch(`${BASE_URL}/evaluation/${examId}/similarity`, {
+    const res = await apiFetch(`${BASE_URL}/evaluation/${examId}/similarity`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').SimilarityFlag[]>(res);
   },
 
   getOmrImage: async (examId: string, sheetId: string, signal?: AbortSignal) => {
-    const res = await fetch(`${BASE_URL}/evaluation/${examId}/sheets/${sheetId}/omr-image`, {
+    const res = await apiFetch(`${BASE_URL}/evaluation/${examId}/sheets/${sheetId}/omr-image`, {
       headers: authHeaders(),
       signal,
     });
@@ -606,7 +617,7 @@ export const evaluationApi = {
       | { action: 'approve'; approvalComment?: string }
       | { action: 'override'; mark: number; comment: string },
   ) => {
-    const res = await fetch(
+    const res = await apiFetch(
       `${BASE_URL}/evaluation/${examId}/entries/${entryId}/review`,
       {
         method: 'PATCH',
@@ -623,7 +634,7 @@ export const evaluationApi = {
   },
 
   completeResultReview: async (examId: string, resultId: string) => {
-    const res = await fetch(
+    const res = await apiFetch(
       `${BASE_URL}/evaluation/${examId}/results/${resultId}/complete`,
       {
         method: 'PATCH',
@@ -637,7 +648,7 @@ export const evaluationApi = {
   },
 
   publishResults: async (examId: string) => {
-    const res = await fetch(`${BASE_URL}/evaluation/${examId}/publish`, {
+    const res = await apiFetch(`${BASE_URL}/evaluation/${examId}/publish`, {
       method: 'POST',
       headers: authHeaders(),
     });
@@ -650,7 +661,7 @@ export const evaluationApi = {
   },
 
   getTeacherRecheckRequests: async () => {
-    const res = await fetch(`${BASE_URL}/teacher/recheck-requests`, {
+    const res = await apiFetch(`${BASE_URL}/teacher/recheck-requests`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').TeacherRecheckRequest[]>(res);
@@ -660,7 +671,7 @@ export const evaluationApi = {
     id: string,
     payload: { decision: 'uphold'; comment: string } | { decision: 'revise'; comment: string; mark: number },
   ) => {
-    const res = await fetch(`${BASE_URL}/teacher/recheck-requests/${id}`, {
+    const res = await apiFetch(`${BASE_URL}/teacher/recheck-requests/${id}`, {
       method: 'PATCH',
       headers: authHeaders(),
       body: JSON.stringify(payload),
@@ -677,7 +688,7 @@ export const evaluationApi = {
 
 export const analyticsApi = {
   getReport: async (examId: string) => {
-    const res = await fetch(`${BASE_URL}/analytics/${examId}`, {
+    const res = await apiFetch(`${BASE_URL}/analytics/${examId}`, {
       headers: authHeaders(),
     });
     return handleResponse<import('@/types').AnalyticsReport>(res);
@@ -685,7 +696,7 @@ export const analyticsApi = {
 
   exportCSV: async (examId: string) => {
     const token = getToken();
-    const res = await fetch(`${BASE_URL}/analytics/${examId}/export`, {
+    const res = await apiFetch(`${BASE_URL}/analytics/${examId}/export`, {
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },

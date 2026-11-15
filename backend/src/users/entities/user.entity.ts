@@ -74,7 +74,7 @@ export class User {
   isProfileComplete: boolean;
 
   @Column({ type: 'varchar', default: 'local' })
-  authProvider: 'local' | 'google';
+  authProvider: 'local';
 
   @Column({ type: 'varchar', nullable: true })
   resetPasswordToken: string | null;

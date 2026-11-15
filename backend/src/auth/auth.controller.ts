@@ -2,15 +2,19 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
+  Res,
   Request,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { AuthService } from './auth.service';
@@ -24,7 +28,6 @@ import { UpdateStudentApplicationDto } from './dto/update-student-application.dt
 import { CreateStudentEnrollmentDto } from './dto/create-student-enrollment.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { GoogleAuthDto } from './dto/google-auth.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -36,23 +39,49 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.login(
       dto.email,
       dto.password,
       dto.role,
       dto.rememberMe,
     );
+    this.setRefreshCookie(response, result);
+    const { refreshToken: _refreshToken, ...authResponse } = result;
+    return authResponse;
   }
 
-  @Post('google-admin-login')
-  googleAdminLogin(@Body() body: { email: string; emailVerified: boolean }) {
-    return this.authService.googleAdminLogin(body.email, body.emailVerified);
+  @Post('refresh')
+  async refresh(
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Headers('origin') origin: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const frontendOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+      .split(',')
+      .map((value) => value.trim().replace(/\/$/, ''));
+    if (!origin || !frontendOrigins.includes(origin.replace(/\/$/, ''))) {
+      throw new ForbiddenException('Refresh request origin is not allowed.');
+    }
+
+    const refreshToken = this.readRefreshCookie(cookieHeader);
+    const result = await this.authService.rotateRefreshToken(refreshToken || '');
+    this.setRefreshCookie(response, result);
+    const { refreshToken: _refreshToken, ...authResponse } = result;
+    return authResponse;
   }
 
-  @Post('google-auth')
-  googleAuth(@Body() dto: GoogleAuthDto) {
-    return this.authService.googleAuth(dto);
+  @Post('logout')
+  async logout(
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.authService.revokeRefreshToken(this.readRefreshCookie(cookieHeader));
+    response.clearCookie('autograde_refresh', this.refreshCookieOptions());
+    return { message: 'Logged out successfully.' };
   }
 
   @Post('forgot-password')
@@ -109,12 +138,6 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   changePassword(@Request() req, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(req.user.id, dto);
-  }
-
-  @Post('logout')
-  @UseGuards(JwtAuthGuard)
-  logout() {
-    return { message: 'Logged out successfully.' };
   }
 
   @Post('register/student')
@@ -210,5 +233,34 @@ export class AuthController {
     @Request() req,
   ) {
     return this.authService.updateRegistrationStatus(id, dto.status, req.user.id, dto.reason);
+  }
+
+  private readRefreshCookie(cookieHeader?: string) {
+    const cookie = cookieHeader
+      ?.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith('autograde_refresh='));
+    return cookie ? cookie.slice('autograde_refresh='.length) : undefined;
+  }
+
+  private refreshCookieOptions() {
+    return {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      path: '/auth',
+    };
+  }
+
+  private setRefreshCookie(
+    response: Response,
+    result: { refreshToken: string; rememberMe: boolean; refreshExpiresAt: string },
+  ) {
+    response.cookie('autograde_refresh', result.refreshToken, {
+      ...this.refreshCookieOptions(),
+      ...(result.rememberMe
+        ? { maxAge: Math.max(0, Date.parse(result.refreshExpiresAt) - Date.now()) }
+        : {}),
+    });
   }
 }

@@ -11,7 +11,7 @@ export interface User {
   university?: string | null;
   profilePicture?: string | null;
   isProfileComplete?: boolean;
-  authProvider?: 'local' | 'google';
+  authProvider?: 'local';
   phone?: string | null;
   rollNumber?: string | null;
   course?: string | null;

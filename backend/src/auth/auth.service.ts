@@ -11,8 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
-import axios from 'axios';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, MoreThan, Repository } from 'typeorm';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { StudentEnrollment } from '../users/entities/student-enrollment.entity';
@@ -22,7 +21,23 @@ import { Department } from '../institutions/entities/department.entity';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { GoogleAuthDto } from './dto/google-auth.dto';
+import { RefreshToken } from './entities/refresh-token.entity';
+
+function parseTokenLifetime(value: string): number {
+  const match = /^(\d+)(s|m|h|d)$/.exec(value);
+  if (!match) {
+    throw new Error(
+      'JWT_REFRESH_EXPIRES_IN must be a positive number followed by s, m, h, or d.',
+    );
+  }
+
+  const factors = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  const lifetime = Number(match[1]) * factors[match[2] as keyof typeof factors];
+  if (!Number.isSafeInteger(lifetime) || lifetime <= 0) {
+    throw new Error('JWT_REFRESH_EXPIRES_IN must be a positive supported duration.');
+  }
+  return lifetime;
+}
 
 const PREDEFINED_ADMIN_ACCOUNTS = [
   { email: 'admin@cuiwah.edu.pk', fullName: 'Chief System Administrator' },
@@ -47,9 +62,12 @@ export class AuthService implements OnModuleInit {
     private courseRepo: Repository<Course>,
     @InjectRepository(Department)
     private departmentRepo: Repository<Department>,
+    @InjectRepository(RefreshToken)
+    private refreshTokenRepo: Repository<RefreshToken>,
   ) {}
 
   async onModuleInit() {
+    this.getRefreshTokenLifetimeMs();
     await this.ensureNativeUuidFunction();
     await this.seedPredefinedAdmins();
   }
@@ -171,8 +189,13 @@ export class AuthService implements OnModuleInit {
     };
   }
 
+  private getRefreshTokenLifetimeMs() {
+    return parseTokenLifetime(process.env.JWT_REFRESH_EXPIRES_IN || '30d');
+  }
+
   private async buildToken(user: User, rememberMe = false) {
-    const expiresIn = rememberMe ? '30d' : '1d';
+    const expiresIn =
+      process.env.JWT_ACCESS_EXPIRES_IN || process.env.JWT_EXPIRES_IN || '15m';
     const token = this.jwtService.sign(
       {
         sub: user.id,
@@ -181,13 +204,109 @@ export class AuthService implements OnModuleInit {
       },
       { expiresIn: expiresIn as any },
     );
+    const refreshToken = crypto.randomBytes(48).toString('hex');
+    const expiresAt = new Date(Date.now() + this.getRefreshTokenLifetimeMs());
+    await this.refreshTokenRepo.save(
+      this.refreshTokenRepo.create({
+        tokenHash: crypto.createHash('sha256').update(refreshToken).digest('hex'),
+        userId: user.id,
+        expiresAt,
+        revokedAt: null,
+        replacedByTokenHash: null,
+        rememberMe,
+      }),
+    );
 
     return {
       token,
+      refreshToken,
       rememberMe,
       expiresIn,
+      refreshExpiresAt: expiresAt.toISOString(),
       user: this.serializeUser(user),
     };
+  }
+
+  async rotateRefreshToken(rawToken: string) {
+    if (!rawToken) {
+      throw new UnauthorizedException('A valid refresh token is required.');
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const now = new Date();
+    const existing = await this.refreshTokenRepo.findOne({
+      where: { tokenHash, revokedAt: IsNull(), expiresAt: MoreThan(now) },
+    });
+    if (!existing) {
+      throw new UnauthorizedException('Refresh token is invalid or expired.');
+    }
+
+    const user = await this.usersService.findById(existing.userId);
+    if (
+      !user ||
+      user.status !== 'APPROVED' ||
+      (user.role === 'admin' && !this.isAuthorizedAdmin(user.email))
+    ) {
+      throw new UnauthorizedException('This account is not permitted to refresh its session.');
+    }
+
+    const refreshToken = crypto.randomBytes(48).toString('hex');
+    const newTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const expiresAt = new Date(now.getTime() + this.getRefreshTokenLifetimeMs());
+    const rememberMe = existing.rememberMe;
+
+    const rotated = await this.dataSource.transaction(async (manager) => {
+      const refreshTokens = manager.getRepository(RefreshToken);
+      const result = await refreshTokens.update(
+        {
+          id: existing.id,
+          revokedAt: IsNull(),
+          expiresAt: MoreThan(now),
+        },
+        { revokedAt: now, replacedByTokenHash: newTokenHash },
+      );
+      if (!result.affected) return false;
+
+      await refreshTokens.save(
+        refreshTokens.create({
+          tokenHash: newTokenHash,
+          userId: user.id,
+          expiresAt,
+          revokedAt: null,
+          replacedByTokenHash: null,
+          rememberMe,
+        }),
+      );
+      return true;
+    });
+
+    if (!rotated) {
+      throw new UnauthorizedException('Refresh token has already been used.');
+    }
+
+    const accessExpiresIn =
+      process.env.JWT_ACCESS_EXPIRES_IN || process.env.JWT_EXPIRES_IN || '15m';
+    const accessToken = this.jwtService.sign(
+      { sub: user.id, email: user.email, role: user.role },
+      { expiresIn: accessExpiresIn as any },
+    );
+    return {
+      token: accessToken,
+      refreshToken,
+      rememberMe,
+      expiresIn: accessExpiresIn,
+      refreshExpiresAt: expiresAt.toISOString(),
+      user: this.serializeUser(user),
+    };
+  }
+
+  async revokeRefreshToken(rawToken?: string) {
+    if (!rawToken) return;
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    await this.refreshTokenRepo.update(
+      { tokenHash, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
   }
 
   async login(
@@ -250,146 +369,6 @@ export class AuthService implements OnModuleInit {
     }
 
     return this.buildToken(user, Boolean(rememberMe));
-  }
-
-  async googleAdminLogin(email: string, emailVerified: boolean) {
-    const normalizedEmail = this.normalizeEmail(email);
-
-    if (!emailVerified || !this.isAuthorizedAdmin(normalizedEmail)) {
-      throw new UnauthorizedException('Unauthorized admin account.');
-    }
-
-    let user = await this.usersService.findByEmail(normalizedEmail);
-    if (!user) {
-      const hashedPassword = await bcrypt.hash('google-admin-login-Admin@123', 10);
-      user = await this.usersService.create({
-        fullName: 'Administrator',
-        email: normalizedEmail,
-        password: hashedPassword,
-        role: 'admin',
-        status: 'APPROVED',
-        university: 'COMSATS University Islamabad, Wah Campus',
-        isProfileComplete: true,
-        authProvider: 'google',
-      });
-    }
-
-    return this.buildToken(user, true);
-  }
-
-  async googleAuth(dto: GoogleAuthDto) {
-    let email = dto.email ? this.normalizeEmail(dto.email) : '';
-    let fullName = dto.fullName?.trim() || '';
-    let picture = dto.profilePicture || null;
-
-    if (dto.idToken) {
-      try {
-        const res = await axios.get(
-          `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(dto.idToken)}`,
-          { timeout: 5000 },
-        );
-        if (res.data?.email) {
-          email = this.normalizeEmail(res.data.email);
-          fullName = res.data.name || fullName || email.split('@')[0];
-          picture = res.data.picture || picture;
-        }
-      } catch {
-        // Fallback if token is a decoded/mock credential in dev mode
-        if (!email) {
-          throw new UnauthorizedException('Invalid Google authentication token.');
-        }
-      }
-    }
-
-    if (!email) {
-      throw new BadRequestException('Google account email is required.');
-    }
-
-    if (dto.role === 'admin') {
-      if (!this.isAuthorizedAdmin(email)) {
-        throw new UnauthorizedException(
-          'This Google account is not authorized as a predefined administrator.',
-        );
-      }
-      return this.googleAdminLogin(email, true);
-    }
-
-    if (this.isAuthorizedAdmin(email)) {
-      throw new BadRequestException(
-        'This email is reserved for a predefined administrator account and cannot be used for teacher or student login.',
-      );
-    }
-
-    let user = await this.usersService.findByEmail(email);
-
-    if (!user) {
-      // Sign-up via Google
-      const normalizedRoll = dto.registrationNumber?.trim().toUpperCase() || null;
-      if (dto.role === 'student' && normalizedRoll) {
-        const existingRoll = await this.usersService.findByRollNumber(normalizedRoll);
-        if (existingRoll) {
-          throw new ConflictException(
-            'A student account with this registration number already exists.',
-          );
-        }
-      }
-
-      const randomPassword = await bcrypt.hash(
-        `Google_${crypto.randomBytes(16).toString('hex')}!A1`,
-        10,
-      );
-
-      user = await this.usersService.create({
-        fullName: fullName || email.split('@')[0],
-        email,
-        password: randomPassword,
-        role: dto.role,
-        status: 'PENDING',
-        university:
-          dto.university?.trim() || 'COMSATS University Islamabad, Wah Campus',
-        rollNumber: dto.role === 'student' ? normalizedRoll : null,
-        profilePicture: picture,
-        isProfileComplete: false,
-        authProvider: 'google',
-        assignedSubjects: dto.role === 'teacher' ? [] : null,
-        requestedAt: new Date(),
-      });
-
-      return {
-        pendingApproval: true,
-        message:
-          dto.role === 'teacher'
-            ? 'Teacher account registered with Google! Your application is now pending administrator approval.'
-            : 'Student account registered with Google! Your account is now pending administrator approval.',
-        user: this.serializeUser(user),
-      };
-    }
-
-    if (user.role !== dto.role) {
-      throw new UnauthorizedException(
-        `This email is already registered as a ${user.role}, not a ${dto.role}.`,
-      );
-    }
-
-    if (picture && !user.profilePicture) {
-      user = await this.usersService.update(user.id, { profilePicture: picture });
-    }
-
-    if (user.status === 'PENDING') {
-      throw new UnauthorizedException(
-        user.role === 'teacher'
-          ? 'Your Google-linked teacher application is awaiting admin approval.'
-          : 'Your Google-linked student registration is awaiting admin approval.',
-      );
-    }
-
-    if (user.status === 'REJECTED') {
-      throw new UnauthorizedException(
-        `Your application was rejected. ${user.rejectionReason || 'Contact the administrator.'}`,
-      );
-    }
-
-    return this.buildToken(user, Boolean(dto.rememberMe));
   }
 
   async getCurrentUser(id: string) {
