@@ -10,9 +10,7 @@ async function bootstrap() {
   app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
   app.enableCors({
-    origin: (process.env.FRONTEND_URL || 'http://localhost:3000')
-      .split(',')
-      .map((value) => value.trim().replace(/\/$/, '')),
+    origin: true,
     credentials: true,
   });
 

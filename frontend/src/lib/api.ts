@@ -1,6 +1,8 @@
 import type { User } from '@/types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || 'http://localhost:3001';
+const formattedApiUrl = /^https?:\/\//i.test(rawApiUrl) ? rawApiUrl : `https://${rawApiUrl}`;
+const BASE_URL = formattedApiUrl.replace(/\/+$/, '');
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
