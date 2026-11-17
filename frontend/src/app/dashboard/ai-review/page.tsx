@@ -417,6 +417,39 @@ function AIReviewContent() {
   const isDeadlineValid = isDeadlineSet && !isDeadlineExpired;
   const canPublish = hasDonePapers && isDeadlineValid;
 
+  const getLiveScore = (studentResult: StudentResult) => {
+    if (!studentResult.entries || !studentResult.entries.length) {
+      const score = typeof studentResult.totalApprovedMark === 'number'
+        ? studentResult.totalApprovedMark
+        : studentResult.totalAiMark;
+      return {
+        score,
+        max: studentResult.totalMaxMarks,
+        percent: Math.round((score / (studentResult.totalMaxMarks || 1)) * 100),
+      };
+    }
+    const sum = studentResult.entries.reduce((total, entry) => {
+      let mark = typeof entry.approvedMark === 'number' ? entry.approvedMark : entry.aiMark;
+      if (studentResult.answersheetId === selectedStudentId && markDrafts[entry.id] !== undefined) {
+        const val = markDrafts[entry.id].trim();
+        if (val !== '') {
+          const num = Number(val);
+          if (Number.isFinite(num) && num >= 0 && num <= entry.maxMarks) {
+            mark = num;
+          }
+        }
+      }
+      return total + mark;
+    }, 0);
+    const roundedScore = Math.round(sum * 100) / 100;
+    const percent = Math.round((roundedScore / (studentResult.totalMaxMarks || 1)) * 100);
+    return {
+      score: roundedScore,
+      max: studentResult.totalMaxMarks,
+      percent,
+    };
+  };
+
   // Check if a student is involved in a high-similarity flag
   const studentHasSimilarity = (studentName: string) =>
     similarities.some(
@@ -633,30 +666,36 @@ function AIReviewContent() {
                     )}
                   >
                     <div className="space-y-2">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-[#1A1A1A]">{result.studentName}</p>
-                          <p className="text-xs text-[#888888]">
-                            Roll no. on paper: {result.registrationNo || 'Not detected'}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-[#005461]">
-                            {result.totalAiMark}/{result.totalMaxMarks}
-                          </p>
-                          <p className="text-xs text-[#888888]">
-                            {Math.round((result.totalAiMark / result.totalMaxMarks) * 100)}%
-                          </p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-[#666666]">
-                        {result.entries.filter((entry) => entry.reviewStatus !== 'pending').length}
-                        {' / '}
-                        {result.entries.length} questions reviewed
-                        {result.totalApprovedMark !== null &&
-                          result.totalApprovedMark !== undefined &&
-                          ` · Final ${result.totalApprovedMark}/${result.totalMaxMarks}`}
-                      </p>
+                      {(() => {
+                        const liveScore = getLiveScore(result);
+                        return (
+                          <>
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-[#1A1A1A]">{result.studentName}</p>
+                                <p className="text-xs text-[#888888]">
+                                  Roll no. on paper: {result.registrationNo || 'Not detected'}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-[#005461]">
+                                  {liveScore.score}/{liveScore.max}
+                                </p>
+                                <p className="text-xs text-[#888888]">
+                                  {liveScore.percent}%
+                                </p>
+                              </div>
+                            </div>
+                            <p className="text-xs text-[#666666]">
+                              {result.entries.filter((entry) => entry.reviewStatus !== 'pending').length}
+                              {' / '}
+                              {result.entries.length} questions reviewed
+                              {result.entries.some((entry) => entry.reviewStatus !== 'pending') &&
+                                ` · Current ${liveScore.score}/${liveScore.max}`}
+                            </p>
+                          </>
+                        );
+                      })()}
                       {result.reviewCompletedAt && (
                         <Badge variant="success">Done · ready to publish</Badge>
                       )}
@@ -744,18 +783,25 @@ function AIReviewContent() {
                   </div>
 
                   <div className="grid grid-cols-3 gap-3 pt-4 border-t border-[#E8DCC8]">
-                    <div>
-                      <p className="text-xs text-[#888888]">Total Score</p>
-                      <p className="text-xl font-bold text-[#005461] mt-1">
-                        {selectedStudent.totalAiMark}/{selectedStudent.totalMaxMarks}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-[#888888]">Percentage</p>
-                      <p className="text-xl font-bold text-[#005461] mt-1">
-                        {Math.round((selectedStudent.totalAiMark / selectedStudent.totalMaxMarks) * 100)}%
-                      </p>
-                    </div>
+                    {(() => {
+                      const live = getLiveScore(selectedStudent);
+                      return (
+                        <>
+                          <div>
+                            <p className="text-xs text-[#888888]">Total Score</p>
+                            <p className="text-xl font-bold text-[#005461] mt-1">
+                              {live.score}/{live.max}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-[#888888]">Percentage</p>
+                            <p className="text-xl font-bold text-[#005461] mt-1">
+                              {live.percent}%
+                            </p>
+                          </div>
+                        </>
+                      );
+                    })()}
                     <div>
                       <p className="text-xs text-[#888888]">
                         {selectedStudent.ocrEngine === 'omr' ? 'Right / Wrong' : 'Flagged'}
@@ -1146,7 +1192,7 @@ function AIReviewContent() {
                   {selectedStudent.studentName} · {selectedStudent.registrationNo}
                 </p>
                 <p className="text-xs text-[#777777]">
-                  Highlighted OMR MCQ Sheet ({selectedStudent.totalAiMark}/{selectedStudent.totalMaxMarks})
+                  Highlighted OMR MCQ Sheet ({getLiveScore(selectedStudent).score}/{selectedStudent.totalMaxMarks})
                 </p>
               </div>
               <button

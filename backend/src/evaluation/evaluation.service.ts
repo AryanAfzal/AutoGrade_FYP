@@ -118,7 +118,14 @@ export class EvaluationService {
       registrationNo: result.answerSheet.registrationNo,
       totalAiMark: result.totalAiMark,
       totalMaxMarks: result.totalMaxMarks,
-      totalApprovedMark: result.totalApprovedMark,
+      totalApprovedMark: typeof result.totalApprovedMark === 'number'
+        ? result.totalApprovedMark
+        : Math.round(
+            result.entries.reduce(
+              (sum, e) => sum + (typeof e.approvedMark === 'number' ? e.approvedMark : e.aiMark),
+              0,
+            ) * 100,
+          ) / 100,
       reviewCompletedAt: result.reviewCompletedAt,
       status: result.status,
       ocrEngine: result.answerSheet.ocrEngine,
@@ -731,12 +738,13 @@ export class EvaluationService {
           resultEntry.approvedMark !== null &&
           resultEntry.approvedMark !== undefined,
       );
-      result.totalApprovedMark = allEntriesReviewed
-        ? result.entries.reduce(
-            (sum, resultEntry) => sum + resultEntry.approvedMark,
-            0,
-          )
-        : null;
+      result.totalApprovedMark = Math.round(
+        result.entries.reduce(
+          (sum, resultEntry) =>
+            sum + (typeof resultEntry.approvedMark === 'number' ? resultEntry.approvedMark : resultEntry.aiMark),
+          0,
+        ) * 100,
+      ) / 100;
       if (allEntriesReviewed) {
         result.reviewCompletedAt = new Date();
       }
