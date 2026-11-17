@@ -14,7 +14,6 @@ import {
   ChevronDown,
   Trash2,
   CheckSquare,
-  ScanLine,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -403,7 +402,7 @@ function UploadSheetsContent() {
               </div>
 
               {/* Paper Type Toggle: Theory Paper vs MCQ Paper (OMR Sheet) */}
-              <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F4ECE0] p-1 mb-3">
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F4ECE0] p-1">
                 <button
                   type="button"
                   onClick={() => setPaperType('theory')}
@@ -433,22 +432,6 @@ function UploadSheetsContent() {
                   MCQ Paper (OMR Sheet)
                 </button>
               </div>
-
-              {paperType === 'mcq' && (
-                <div className="flex items-center gap-3 rounded-xl border-2 border-[#005461] bg-[#005461] px-3.5 py-2.5 text-white shadow-sm">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[#FAB963] text-[#1A1A1A]">
-                    <ScanLine size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold leading-tight">
-                      OMR Bubble Scanner Active (30-MCQ-V1)
-                    </p>
-                    <p className="text-[10px] leading-tight text-[#C8E6EA] mt-0.5">
-                      Upload multiple MCQ OMR PDFs · Auto-detects Candidate ID, shaded A/B/C/D bubbles &amp; highlights right/wrong answers
-                    </p>
-                  </div>
-                </div>
-              )}
             </div>
             <div
           onDragOver={(e) => {
