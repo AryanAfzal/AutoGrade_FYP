@@ -604,7 +604,7 @@ export const evaluationApi = {
     entryId: string,
     payload:
       | { action: 'approve'; approvalComment?: string }
-      | { action: 'override'; mark: number; comment: string },
+      | { action: 'override'; mark: number; comment?: string },
   ) => {
     const res = await fetch(
       `${BASE_URL}/evaluation/${examId}/entries/${entryId}/review`,
@@ -646,6 +646,22 @@ export const evaluationApi = {
       publishedCount: number;
       examCompleted: boolean;
       publishedAt: string | null;
+    }>(res);
+  },
+
+  addGraceMarks: async (
+    examId: string,
+    data: { marks: number; resultIds?: string[] },
+  ) => {
+    const res = await fetch(`${BASE_URL}/evaluation/${examId}/grace-marks`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<{
+      success: boolean;
+      updatedCount: number;
+      message: string;
     }>(res);
   },
 

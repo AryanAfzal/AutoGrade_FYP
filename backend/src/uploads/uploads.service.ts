@@ -13,6 +13,7 @@ import { AnswerEntry } from '../evaluation/entities/answer-entry.entity';
 import { ReviewAudit } from '../evaluation/entities/review-audit.entity';
 import { RecheckRequest } from '../evaluation/entities/recheck-request.entity';
 import { RecheckAudit } from '../evaluation/entities/recheck-audit.entity';
+import { Exam } from '../exams/entities/exam.entity';
 
 function extractRollNumberFromFilename(fileName: string): string | null {
   const fullMatch = fileName.match(
@@ -86,6 +87,16 @@ export class UploadsService {
         status:         'uploaded',
       });
       sheets.push(await this.sheetRepo.save(sheet));
+    }
+
+    if (sheets.length > 0) {
+      const examRepo = this.dataSource.getRepository(Exam);
+      const exam = await examRepo.findOne({ where: { id: examId } });
+      if (exam && exam.status === 'published') {
+        exam.status = 'under_review';
+        exam.publishedAt = null;
+        await examRepo.save(exam);
+      }
     }
 
     return sheets;
@@ -203,6 +214,22 @@ export class UploadsService {
       }
 
       await manager.getRepository(AnswerSheet).delete({ id: sheet.id });
+
+      const examRepo = manager.getRepository(Exam);
+      const exam = await examRepo.findOne({ where: { id: examId } });
+      if (exam && exam.status === 'published') {
+        const remainingUnpublishedResults = await manager.getRepository(StudentResult).count({
+          where: { answerSheet: { exam: { id: examId } }, status: 'awaiting_approval' },
+        });
+        const remainingSheets = await manager.getRepository(AnswerSheet).count({
+          where: { exam: { id: examId } },
+        });
+        if (remainingSheets === 0 || remainingUnpublishedResults > 0) {
+          exam.status = 'under_review';
+          exam.publishedAt = null;
+          await examRepo.save(exam);
+        }
+      }
     });
 
     const uploadsDirectory = path.resolve(process.cwd(), 'uploads');

@@ -15,6 +15,7 @@ import { RecheckRequest } from './entities/recheck-request.entity';
 import { RecheckAudit } from './entities/recheck-audit.entity';
 import { UserNotification } from './entities/user-notification.entity';
 import { ReviewAnswerEntryDto } from './dto/review-answer-entry.dto';
+import { AddGraceMarksDto } from './dto/add-grace-marks.dto';
 import { CreateRecheckRequestDto } from './dto/create-recheck-request.dto';
 import { DecideRecheckRequestDto } from './dto/decide-recheck-request.dto';
 import { User } from '../users/entities/user.entity';
@@ -682,7 +683,11 @@ export class EvaluationService {
       }
 
       let finalMark = entry.aiMark;
-      let comment: string | null = dto.approvalComment?.trim() || null;
+      let comment: string =
+        dto.comment?.trim() ||
+        dto.approvalComment?.trim() ||
+        (dto.action === 'override' ? 'Teacher revised mark' : 'AI mark approved');
+
       if (dto.action === 'override') {
         if (typeof dto.mark !== 'number' || !Number.isFinite(dto.mark)) {
           throw new BadRequestException('A valid revised mark is required.');
@@ -692,13 +697,7 @@ export class EvaluationService {
             `The revised mark cannot exceed ${entry.maxMarks}.`,
           );
         }
-        if (!dto.comment?.trim()) {
-          throw new BadRequestException(
-            'A comment is required when overriding an AI-assigned mark.',
-          );
-        }
         finalMark = Math.round(dto.mark * 100) / 100;
-        comment = dto.comment.trim();
         entry.reviewStatus = 'overridden';
       } else {
         entry.reviewStatus = 'approved';
@@ -726,19 +725,20 @@ export class EvaluationService {
       if (!result) {
         throw new NotFoundException('Evaluation result no longer exists.');
       }
-      result.totalApprovedMark = result.entries.every(
+      const allEntriesReviewed = result.entries.every(
         (resultEntry) =>
           resultEntry.reviewStatus !== 'pending' &&
           resultEntry.approvedMark !== null &&
           resultEntry.approvedMark !== undefined,
-      )
+      );
+      result.totalApprovedMark = allEntriesReviewed
         ? result.entries.reduce(
             (sum, resultEntry) => sum + resultEntry.approvedMark,
             0,
           )
         : null;
-      if (result.reviewCompletedAt) {
-        result.reviewCompletedAt = null;
+      if (allEntriesReviewed) {
+        result.reviewCompletedAt = new Date();
       }
       await resultRepo.save(result);
 
@@ -871,9 +871,6 @@ export class EvaluationService {
       if (!exam) {
         throw new NotFoundException('Exam not found.');
       }
-      if (exam.status === 'published' || exam.publishedAt) {
-        throw new BadRequestException('Results for this exam are already published.');
-      }
       if (!exam.recheckDeadline || exam.recheckDeadline <= new Date()) {
         throw new BadRequestException(
           'Set a future recheck deadline for this exam before publishing results.',
@@ -901,9 +898,13 @@ export class EvaluationService {
           result.status === 'awaiting_approval',
       );
       if (!completedResults.length) {
-        throw new BadRequestException(
-          'Mark at least one fully reviewed paper done before publishing.',
-        );
+        const hasAwaiting = results.some((result) => result.status === 'awaiting_approval');
+        if (hasAwaiting) {
+          throw new BadRequestException(
+            'Mark at least one fully reviewed paper done before publishing.',
+          );
+        }
+        throw new BadRequestException('Results for this exam are already published.');
       }
 
       for (const result of completedResults) {
@@ -948,12 +949,18 @@ export class EvaluationService {
 
       const allResultsPublished =
         results.length === sheets.length &&
-        results.every((result) => result.status === 'approved');
+        results.every(
+          (result) =>
+            result.status === 'approved' ||
+            completedResults.some((cr) => cr.id === result.id),
+        );
       if (allResultsPublished) {
         exam.status = 'published';
         exam.publishedAt = publishedAt;
-        await examRepo.save(exam);
+      } else {
+        exam.status = 'under_review';
       }
+      await examRepo.save(exam);
 
       return {
         message: allResultsPublished
@@ -962,6 +969,114 @@ export class EvaluationService {
         publishedCount: completedResults.length,
         examCompleted: allResultsPublished,
         publishedAt,
+      };
+    });
+  }
+
+  async addGraceMarks(examId: string, dto: AddGraceMarksDto, user: User) {
+    if (typeof dto.marks !== 'number' || !Number.isFinite(dto.marks) || dto.marks <= 0) {
+      throw new BadRequestException('Grace marks must be a positive number.');
+    }
+    const graceMarksToAdd = Math.round(dto.marks * 100) / 100;
+
+    return this.resultRepo.manager.transaction(async (manager) => {
+      const examRepo = manager.getRepository(Exam);
+      const exam = await examRepo.findOne({
+        where: { id: examId, createdBy: { id: user.id } },
+        relations: ['questions'],
+      });
+      if (!exam) {
+        throw new NotFoundException('Exam not found.');
+      }
+
+      const resultRepo = manager.getRepository(StudentResult);
+      const entryRepo = manager.getRepository(AnswerEntry);
+      const auditRepo = manager.getRepository(ReviewAudit);
+
+      let query = resultRepo
+        .createQueryBuilder('result')
+        .innerJoinAndSelect('result.answerSheet', 'answerSheet')
+        .innerJoinAndSelect('answerSheet.exam', 'exam')
+        .leftJoinAndSelect('result.entries', 'entries')
+        .where('exam.id = :examId', { examId });
+
+      if (dto.resultIds && dto.resultIds.length > 0) {
+        query = query.andWhere('result.id IN (:...resultIds)', { resultIds: dto.resultIds });
+      }
+
+      const results = await query.getMany();
+      if (!results.length) {
+        throw new NotFoundException('No student results found to apply grace marks.');
+      }
+
+      let updatedCount = 0;
+      for (const result of results) {
+        if (!result.entries || !result.entries.length) continue;
+
+        const currentTotal = result.entries.reduce(
+          (sum, e) => sum + (e.approvedMark ?? e.aiMark),
+          0,
+        );
+        const maxAwardable = Math.max(0, result.totalMaxMarks - currentTotal);
+        if (maxAwardable <= 0) continue;
+
+        let remainingGrace = Math.min(graceMarksToAdd, maxAwardable);
+
+        // Sort entries by headroom descending so marks are added where student lost most marks
+        const sortedEntries = [...result.entries].sort((a, b) => {
+          const headroomA = a.maxMarks - (a.approvedMark ?? a.aiMark);
+          const headroomB = b.maxMarks - (b.approvedMark ?? b.aiMark);
+          return headroomB - headroomA;
+        });
+
+        let anyEntryUpdated = false;
+        for (const entry of sortedEntries) {
+          if (remainingGrace <= 0.001) break;
+          const currentMark = entry.approvedMark ?? entry.aiMark;
+          const headroom = entry.maxMarks - currentMark;
+          if (headroom <= 0) continue;
+
+          const toAdd = Math.round(Math.min(headroom, remainingGrace) * 100) / 100;
+          if (toAdd <= 0) continue;
+
+          const newMark = Math.round((currentMark + toAdd) * 100) / 100;
+          entry.approvedMark = newMark;
+          entry.reviewStatus = 'overridden';
+          remainingGrace = Math.round((remainingGrace - toAdd) * 100) / 100;
+          anyEntryUpdated = true;
+
+          const audit = auditRepo.create({
+            answerEntry: entry,
+            reviewer: { id: user.id },
+            action: 'override',
+            originalAiMark: entry.aiMark,
+            finalMark: newMark,
+            comment: `Teacher awarded +${toAdd} grace mark(s)`,
+          });
+          await auditRepo.save(audit);
+          await entryRepo.save(entry);
+        }
+
+        if (anyEntryUpdated) {
+          result.totalApprovedMark = result.entries.reduce(
+            (sum, e) => sum + (e.approvedMark ?? e.aiMark),
+            0,
+          );
+          const allEntriesReviewed = result.entries.every(
+            (e) => e.reviewStatus !== 'pending' && e.approvedMark !== null && e.approvedMark !== undefined,
+          );
+          if (allEntriesReviewed) {
+            result.reviewCompletedAt = new Date();
+          }
+          await resultRepo.save(result);
+          updatedCount++;
+        }
+      }
+
+      return {
+        success: true,
+        updatedCount,
+        message: `Successfully added ${graceMarksToAdd} grace mark(s) to ${updatedCount} student paper(s).`,
       };
     });
   }

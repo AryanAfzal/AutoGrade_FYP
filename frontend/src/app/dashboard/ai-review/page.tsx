@@ -13,6 +13,7 @@ import {
   ScanLine,
   TrendingDown,
   MessageSquare,
+  Sparkles,
   X,
   XCircle,
 } from 'lucide-react';
@@ -62,6 +63,10 @@ function AIReviewContent() {
   const [omrImageError, setOmrImageError] = useState('');
   const [omrModalOpen, setOmrModalOpen] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
+  const [showGraceModal, setShowGraceModal] = useState(false);
+  const [graceMarksValue, setGraceMarksValue] = useState('2');
+  const [graceTarget, setGraceTarget] = useState<'all' | 'selected'>('all');
+  const [applyingGrace, setApplyingGrace] = useState(false);
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -143,19 +148,16 @@ function AIReviewContent() {
     let payload: { action: 'approve'; approvalComment?: string } | {
       action: 'override';
       mark: number;
-      comment: string;
+      comment?: string;
     };
     if (action === 'override') {
       const mark = Number(markDrafts[entry.id] ?? entry.approvedMark ?? entry.aiMark);
-      const comment = (commentDrafts[entry.id] || '').trim();
+      const rawComment = (commentDrafts[entry.id] || '').trim();
       if (!Number.isFinite(mark) || mark < 0 || mark > entry.maxMarks) {
         setError(`Enter a revised mark between 0 and ${entry.maxMarks}.`);
         return;
       }
-      if (!comment) {
-        setError('A comment is required when overriding an AI-assigned mark.');
-        return;
-      }
+      const comment = rawComment || 'Teacher revised mark';
       payload = { action: 'override', mark, comment };
     } else {
       payload = { action: 'approve' };
@@ -258,6 +260,36 @@ function AIReviewContent() {
       setError(saveError instanceof Error ? saveError.message : 'Unable to extend deadline.');
     } finally {
       setSavingDeadline(false);
+    }
+  };
+
+  const handleApplyGraceMarks = async () => {
+    if (!examId) return;
+    const marksNum = Number(graceMarksValue);
+    if (!Number.isFinite(marksNum) || marksNum <= 0) {
+      setError('Please enter a valid positive number for grace marks.');
+      return;
+    }
+    setApplyingGrace(true);
+    setError('');
+    setNotice('');
+    try {
+      const resultIds =
+        graceTarget === 'selected' && selectedStudentId
+          ? [selectedStudentId]
+          : undefined;
+      const res = await evaluationApi.addGraceMarks(examId, {
+        marks: marksNum,
+        resultIds,
+      });
+      const refreshedResults = await evaluationApi.getResults(examId);
+      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
+      setNotice(res.message);
+      setShowGraceModal(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unable to apply grace marks.');
+    } finally {
+      setApplyingGrace(false);
     }
   };
 
@@ -423,21 +455,31 @@ function AIReviewContent() {
               Approve or override each question before publishing · {results.length} submission(s) pending
             </p>
           </div>
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-wrap items-center gap-3">
             <Button
-              variant="primary"
-              onClick={handlePublish}
-              loading={publishing}
-              disabled={!hasDonePapers || publishing}
+              variant="secondary"
+              onClick={() => setShowGraceModal(true)}
+              disabled={results.length === 0}
             >
-              <CheckCircle2 size={14} className="mr-2" />
-              Publish done papers ({doneCount})
+              <Sparkles size={14} className="mr-2 text-amber-500" />
+              Add Grace Marks
             </Button>
-            {hasDonePapers && !isDeadlineValid && (
-              <span className="text-[11px] text-amber-700 font-medium">
-                {isDeadlineExpired ? '⚠️ Deadline expired (will extend & publish)' : '⚠️ Deadline needed (will set & publish)'}
-              </span>
-            )}
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                variant="primary"
+                onClick={handlePublish}
+                loading={publishing}
+                disabled={!hasDonePapers || publishing}
+              >
+                <CheckCircle2 size={14} className="mr-2" />
+                Publish done papers ({doneCount})
+              </Button>
+              {hasDonePapers && !isDeadlineValid && (
+                <span className="text-[11px] text-amber-700 font-medium">
+                  {isDeadlineExpired ? '⚠️ Deadline expired (will extend & publish)' : '⚠️ Deadline needed (will set & publish)'}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1010,7 +1052,7 @@ function AIReviewContent() {
                             />
                           </label>
                           <label className="flex flex-col gap-1 text-xs text-[#666666]">
-                            Override comment (required to revise)
+                            Override comment (optional)
                             <textarea
                               rows={2}
                               value={commentDrafts[entry.id] || ''}
@@ -1020,7 +1062,7 @@ function AIReviewContent() {
                                   [entry.id]: event.target.value,
                                 }))
                               }
-                              placeholder="Explain why the AI mark is being changed"
+                              placeholder="Optional reason for revising the mark"
                               className="resize-y rounded-lg border border-[#E8DCC8] bg-white px-3 py-2 text-sm text-[#1A1A1A]"
                             />
                           </label>
@@ -1121,6 +1163,105 @@ function AIReviewContent() {
               alt={`Full checked OMR sheet for ${selectedStudent.studentName}`}
               className="w-full h-auto rounded-lg border border-[#E8DCC8]"
             />
+          </div>
+        </div>
+      )}
+
+      {showGraceModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowGraceModal(false)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#E8DCC8]">
+              <div className="flex items-center gap-2">
+                <Sparkles size={18} className="text-[#FAB963]" />
+                <h3 className="text-base font-bold text-[#1A1A1A]">Award Grace Marks</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGraceModal(false)}
+                className="rounded-lg p-1 text-[#666666] hover:bg-[#F5EFE6] hover:text-[#1A1A1A]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-[#666666]">
+              Add bonus marks across student papers for this exam. Marks will be distributed across questions without exceeding question maximums.
+            </p>
+
+            <div className="space-y-3">
+              <label className="flex flex-col gap-1 text-xs font-medium text-[#1A1A1A]">
+                Grace marks to add:
+                <input
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={graceMarksValue}
+                  onChange={(e) => setGraceMarksValue(e.target.value)}
+                  className="rounded-lg border border-[#E8DCC8] bg-white px-3 py-2 text-sm text-[#1A1A1A]"
+                  placeholder="e.g. 2 or 3"
+                />
+              </label>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[#1A1A1A]">Apply to:</label>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-xs text-[#1A1A1A] cursor-pointer">
+                    <input
+                      type="radio"
+                      name="graceTarget"
+                      checked={graceTarget === 'all'}
+                      onChange={() => setGraceTarget('all')}
+                      className="accent-[#005461]"
+                    />
+                    <span>All student papers in this exam ({results.length})</span>
+                  </label>
+                  <label
+                    className={cn(
+                      'flex items-center gap-2 text-xs cursor-pointer',
+                      selectedStudent ? 'text-[#1A1A1A]' : 'text-gray-400 cursor-not-allowed'
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="graceTarget"
+                      checked={graceTarget === 'selected'}
+                      onChange={() => setGraceTarget('selected')}
+                      disabled={!selectedStudent}
+                      className="accent-[#005461]"
+                    />
+                    <span>
+                      Selected student only {selectedStudent ? `(${selectedStudent.studentName})` : '(No student selected)'}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-[#E8DCC8]">
+              <Button
+                variant="ghost"
+                type="button"
+                onClick={() => setShowGraceModal(false)}
+                disabled={applyingGrace}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                type="button"
+                onClick={handleApplyGraceMarks}
+                loading={applyingGrace}
+                disabled={applyingGrace || !graceMarksValue}
+              >
+                Apply Grace Marks
+              </Button>
+            </div>
           </div>
         </div>
       )}
