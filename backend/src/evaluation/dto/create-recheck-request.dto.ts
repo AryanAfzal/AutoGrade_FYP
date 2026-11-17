@@ -5,6 +5,6 @@ export class CreateRecheckRequestDto {
   answerEntryId: string;
 
   @IsString()
-  @MinLength(50, { message: 'Justification must be at least 50 characters.' })
+  @MinLength(10, { message: 'Justification must be at least 10 characters.' })
   justification: string;
 }

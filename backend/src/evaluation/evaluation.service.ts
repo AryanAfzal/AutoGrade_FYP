@@ -198,7 +198,11 @@ export class EvaluationService {
       subject: result.answerSheet.exam.course,
       term: result.answerSheet.exam.term,
       rollNumber: result.answerSheet.registrationNo,
-      totalMarks: result.totalApprovedMark,
+      totalMarks: result.totalApprovedMark !== null && result.totalApprovedMark !== undefined
+        ? Math.round(result.totalApprovedMark * 100) / 100
+        : (result.totalAiMark !== null && result.totalAiMark !== undefined
+            ? Math.round(result.totalAiMark * 100) / 100
+            : null),
       maxMarks: result.totalMaxMarks,
       publishedAt: result.publishedAt,
       recheckDeadline: result.answerSheet.exam.recheckDeadline,
@@ -215,7 +219,9 @@ export class EvaluationService {
           : null,
         questionText: entry.questionText,
         studentAnswer: entry.studentAnswer || 'No answer was extracted for this question.',
-        mark: entry.approvedMark,
+        mark: typeof entry.approvedMark === 'number'
+          ? Math.round(entry.approvedMark * 100) / 100
+          : (typeof entry.aiMark === 'number' ? Math.round(entry.aiMark * 100) / 100 : null),
         maxMarks: entry.maxMarks,
         feedback: entry.feedback,
       })),
@@ -224,8 +230,8 @@ export class EvaluationService {
 
   async submitRecheckRequest(dto: CreateRecheckRequestDto, user: User) {
     const justification = dto.justification.trim();
-    if (justification.length < 50) {
-      throw new BadRequestException('Justification must be at least 50 characters.');
+    if (justification.length < 10) {
+      throw new BadRequestException('Justification must be at least 10 characters.');
     }
 
     return this.resultRepo.manager.transaction(async (manager) => {
