@@ -15,6 +15,7 @@ import {
   MessageSquare,
   ChevronsLeft,
   ChevronsRight,
+  Award,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getStoredUser } from '@/lib/api';
@@ -32,6 +33,7 @@ const teacherNavItems: NavItem[] = [
   { label: 'Create Exam', href: '/dashboard/create-exam', icon: FilePlus },
   { label: 'Upload Sheets', href: '/dashboard/upload-sheets', icon: Upload },
   { label: 'AI Review', href: '/dashboard/ai-review', icon: ClipboardCheck },
+  { label: 'Published Results', href: '/dashboard/published-results', icon: Award },
   { label: 'Recheck Requests', href: '/dashboard/recheck-requests', icon: MessageSquare },
   { label: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
 ];

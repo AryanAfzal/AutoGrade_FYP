@@ -161,6 +161,101 @@ export class EvaluationService {
     }));
   }
 
+  async getPublishedPapers(user: User, examId?: string) {
+    let query = this.resultRepo
+      .createQueryBuilder('result')
+      .innerJoinAndSelect('result.answerSheet', 'answerSheet')
+      .innerJoinAndSelect('answerSheet.exam', 'exam')
+      .leftJoinAndSelect('exam.createdBy', 'examCreator')
+      .leftJoinAndSelect('result.entries', 'entry')
+      .leftJoinAndSelect('entry.reviewAuditTrail', 'audit')
+      .leftJoinAndSelect('audit.reviewer', 'reviewer')
+      .where('result.status = :status', { status: 'approved' })
+      .andWhere('result.publishedAt IS NOT NULL');
+
+    if (user.role === 'teacher') {
+      query = query.andWhere('examCreator.id = :userId', { userId: user.id });
+    }
+
+    if (examId) {
+      query = query.andWhere('exam.id = :examId', { examId });
+    }
+
+    query = query
+      .orderBy('result.publishedAt', 'DESC')
+      .addOrderBy('answerSheet.studentName', 'ASC');
+
+    const results = await query.getMany();
+
+    return results.map((result) => {
+      const exam = result.answerSheet.exam;
+      const questionOrder = new Map(
+        (exam.questions || []).map((q, index) => [q.id, index]),
+      );
+
+      return {
+        id: result.id,
+        answersheetId: result.answerSheet.id,
+        examId: exam.id,
+        examTitle: exam.title,
+        course: exam.course,
+        term: exam.term,
+        recheckDeadline: exam.recheckDeadline,
+        studentName: result.answerSheet.studentName,
+        registrationNo: result.answerSheet.registrationNo,
+        totalAiMark: result.totalAiMark,
+        totalApprovedMark: result.totalApprovedMark,
+        totalMaxMarks: result.totalMaxMarks,
+        publishedAt: result.publishedAt,
+        reviewCompletedAt: result.reviewCompletedAt,
+        status: result.status,
+        cheatingStatus: result.cheatingStatus || 'clean',
+        cheatingPenaltyNotes: result.cheatingPenaltyNotes || null,
+        cheatingReport: result.cheatingReport || null,
+        ocrEngine: result.answerSheet.ocrEngine,
+        hasOmrImage: Boolean(result.answerSheet.omrAnnotatedPath),
+        entries: [...(result.entries || [])]
+          .sort(
+            (a, b) =>
+              (questionOrder.get(a.questionId) ?? Number.MAX_SAFE_INTEGER) -
+              (questionOrder.get(b.questionId) ?? Number.MAX_SAFE_INTEGER),
+          )
+          .map((entry) => ({
+            id: entry.id,
+            questionId: entry.questionId,
+            questionText: entry.questionText,
+            studentAnswer: entry.studentAnswer || 'No answer extracted.',
+            referenceAnswer: entry.referenceAnswer,
+            aiMark: entry.aiMark,
+            approvedMark: entry.approvedMark,
+            maxMarks: entry.maxMarks,
+            confidence: entry.confidence,
+            semanticScore: entry.semanticScore,
+            keywordScore: entry.keywordScore,
+            reviewStatus: entry.reviewStatus,
+            type: entry.type,
+            rubricBreakdown: entry.rubricBreakdown,
+            feedback: entry.feedback,
+            reviewAuditTrail: (entry.reviewAuditTrail || [])
+              .sort(
+                (a, b) =>
+                  new Date(a.reviewedAt).getTime() -
+                  new Date(b.reviewedAt).getTime(),
+              )
+              .map((audit) => ({
+                id: audit.id,
+                action: audit.action,
+                originalAiMark: audit.originalAiMark,
+                finalMark: audit.finalMark,
+                comment: audit.comment,
+                reviewedAt: audit.reviewedAt,
+                reviewerName: audit.reviewer?.fullName || 'Teacher',
+              })),
+          })),
+      };
+    });
+  }
+
   async getPublishedStudentResults(user: User) {
     if (user.role !== 'student' || user.status !== 'APPROVED' || !user.rollNumber) {
       throw new BadRequestException(

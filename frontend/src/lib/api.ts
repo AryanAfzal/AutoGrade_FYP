@@ -592,6 +592,14 @@ export const evaluationApi = {
     return handleResponse<import('@/types').StudentResult[]>(res);
   },
 
+  getPublishedPapers: async (examId?: string) => {
+    const query = examId ? `?examId=${encodeURIComponent(examId)}` : '';
+    const res = await apiFetch(`${BASE_URL}/evaluation/published/papers${query}`, {
+      headers: authHeaders(),
+    });
+    return handleResponse<import('@/types').PublishedPaperItem[]>(res);
+  },
+
   getSimilarityFlags: async (examId: string) => {
     const res = await apiFetch(`${BASE_URL}/evaluation/${examId}/similarity`, {
       headers: authHeaders(),

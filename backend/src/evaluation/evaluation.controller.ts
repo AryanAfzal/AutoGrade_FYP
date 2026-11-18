@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Request,
   StreamableFile,
   UseGuards,
@@ -30,6 +31,11 @@ export class EvaluationController {
     @Body('ocrEngine') ocrEngine?: string,
   ) {
     return this.evaluationService.triggerEvaluation(examId, req.user, ocrEngine);
+  }
+
+  @Get('published/papers')
+  getPublishedPapers(@Query('examId') examId: string | undefined, @Request() req) {
+    return this.evaluationService.getPublishedPapers(req.user, examId);
   }
 
   @Get(':examId')

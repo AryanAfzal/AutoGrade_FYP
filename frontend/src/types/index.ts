@@ -331,6 +331,30 @@ export interface StudentResult {
   entries: AnswerEntry[];
 }
 
+export interface PublishedPaperItem {
+  id: string;
+  answersheetId: string;
+  examId: string;
+  examTitle: string;
+  course: string;
+  term: string;
+  recheckDeadline: string | null;
+  studentName: string;
+  registrationNo: string;
+  totalAiMark: number;
+  totalApprovedMark: number | null;
+  totalMaxMarks: number;
+  publishedAt: string | null;
+  reviewCompletedAt: string | null;
+  status: SheetStatus;
+  cheatingStatus?: 'clean' | 'suspected' | 'confirmed_cheating';
+  cheatingPenaltyNotes?: string | null;
+  cheatingReport?: any | null;
+  ocrEngine?: OcrEngine;
+  hasOmrImage?: boolean;
+  entries: AnswerEntry[];
+}
+
 // SIMILARITY
 export type SimilarityStatus = 'review' | 'suspected' | 'critical';
 
