@@ -28,6 +28,15 @@ export class StudentResult {
   @Column({ default: 'awaiting_approval' })
   status: string;
 
+  @Column({ default: 'clean', nullable: true })
+  cheatingStatus: string; // 'clean' | 'suspected' | 'confirmed_cheating'
+
+  @Column({ type: 'text', nullable: true })
+  cheatingPenaltyNotes: string | null;
+
+  @Column('jsonb', { nullable: true })
+  cheatingReport: any | null;
+
   @OneToMany(() => AnswerEntry, (e) => e.result, { cascade: true, eager: true })
   entries: AnswerEntry[];
 }

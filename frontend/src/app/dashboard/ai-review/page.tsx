@@ -5,15 +5,22 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  ArrowRightLeft,
   Check,
   CheckCircle2,
+  ChevronRight,
+  Eye,
+  FileText,
   Flag,
   Loader,
   Maximize2,
-  ScanLine,
-  TrendingDown,
   MessageSquare,
+  Scale,
+  ScanLine,
+  ShieldAlert,
   Sparkles,
+  TrendingDown,
+  Users,
   X,
   XCircle,
 } from 'lucide-react';
@@ -28,8 +35,68 @@ import type {
   Exam,
   SimilarityFlag,
   SimilarityReport,
+  GroupedSimilarityPair,
+  SimilarityQuestionComparison,
+  MatchedSegment,
 } from '@/types';
 import { cn, getConfidenceLabel } from '@/lib/utils';
+
+function HighlightedAnswerText({
+  text,
+  segments,
+  side,
+}: {
+  text: string;
+  segments?: MatchedSegment[];
+  side: 'A' | 'B';
+}) {
+  if (!text || !text.trim()) {
+    return <span className="italic text-gray-400">No answer text provided</span>;
+  }
+  if (!segments || segments.length === 0) {
+    return <span className="text-[#222222] leading-relaxed whitespace-pre-wrap">{text}</span>;
+  }
+
+  const phrases = segments
+    .map((s) => (side === 'A' ? s.textA : s.textB)?.trim())
+    .filter((p): p is string => Boolean(p && p.length >= 8));
+
+  if (phrases.length === 0) {
+    return <span className="text-[#222222] leading-relaxed whitespace-pre-wrap">{text}</span>;
+  }
+
+  const escaped = phrases
+    .sort((a, b) => b.length - a.length)
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+
+  try {
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = text.split(regex);
+
+    return (
+      <span className="text-[#222222] leading-relaxed whitespace-pre-wrap">
+        {parts.map((part, i) => {
+          const isMatch = phrases.some((p) => p.toLowerCase() === part.toLowerCase());
+          if (isMatch) {
+            return (
+              <mark
+                key={i}
+                className="bg-amber-200 text-amber-950 px-1 py-0.5 rounded font-medium border-b-2 border-amber-500"
+                title="Matching copied text"
+              >
+                {part}
+              </mark>
+            );
+          }
+          return <span key={i}>{part}</span>;
+        })}
+      </span>
+    );
+  } catch {
+    return <span className="text-[#222222] leading-relaxed whitespace-pre-wrap">{text}</span>;
+  }
+}
 
 const confidenceVariant = (confidence: number): 'default' | 'success' | 'warning' | 'danger' | 'info' | 'amber' => {
   if (confidence >= 0.75) return 'success';
@@ -67,6 +134,17 @@ function AIReviewContent() {
   const [graceMarksValue, setGraceMarksValue] = useState('2');
   const [graceTarget, setGraceTarget] = useState<'all' | 'selected'>('all');
   const [applyingGrace, setApplyingGrace] = useState(false);
+
+  const [groupedPairs, setGroupedPairs] = useState<GroupedSimilarityPair[]>([]);
+  const [selectedPair, setSelectedPair] = useState<GroupedSimilarityPair | null>(null);
+  const [comparisonModalOpen, setComparisonModalOpen] = useState(false);
+  const [confirmCheatingOpen, setConfirmCheatingOpen] = useState(false);
+  const [penaltyTarget, setPenaltyTarget] = useState<'both' | 'student_a' | 'student_b'>('both');
+  const [cheatingNotes, setCheatingNotes] = useState(
+    'Confirmed unauthorized copying across questions with identical sentence structure, verbatim phrasing, and list ordering.',
+  );
+  const [submittingPenalty, setSubmittingPenalty] = useState(false);
+  const [activeQuestionTab, setActiveQuestionTab] = useState<number | 'all'>('all');
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -121,13 +199,18 @@ function AIReviewContent() {
 
     evaluationApi.getSimilarityFlags(examId)
       .then((similarityData) => {
-        // Backend returns { examId, summary, flaggedPairs }
+        // Backend returns { examId, summary, flaggedPairs, groupedPairs }
         if (Array.isArray(similarityData)) {
           setSimilarities(similarityData);
         } else if (similarityData && Array.isArray((similarityData as SimilarityReport).flaggedPairs)) {
-          setSimilarities((similarityData as SimilarityReport).flaggedPairs);
+          const rep = similarityData as SimilarityReport;
+          setSimilarities(rep.flaggedPairs);
+          if (rep.groupedPairs && Array.isArray(rep.groupedPairs)) {
+            setGroupedPairs(rep.groupedPairs);
+          }
         } else {
           setSimilarities([]);
+          setGroupedPairs([]);
         }
       })
       .catch((similarityError: unknown) =>
@@ -455,8 +538,96 @@ function AIReviewContent() {
     similarities.some(
       (s) =>
         (s.studentA.name === studentName || s.studentB.name === studentName) &&
-        s.similarityScore >= 0.85
+        (s.similarityScore >= 0.70 || s.riskLevel === 'critical' || s.riskLevel === 'suspicious')
     );
+
+  const handleDecideSimilarity = async (
+    pair: GroupedSimilarityPair,
+    action: 'confirm_cheating' | 'dismiss',
+    customTarget?: 'both' | 'student_a' | 'student_b',
+    customNotes?: string,
+  ) => {
+    if (!examId) return;
+    setSubmittingPenalty(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const target = customTarget || penaltyTarget;
+      const notes = customNotes || cheatingNotes;
+
+      const res = await evaluationApi.decideSimilarity(examId, {
+        action,
+        penaltyTarget: target,
+        studentAResultId: pair.studentA.resultId,
+        studentBResultId: pair.studentB.resultId,
+        studentARegNo: pair.studentA.regNo,
+        studentBRegNo: pair.studentB.regNo,
+        teacherNotes: notes,
+        reportData: {
+          pairKey: pair.pairKey,
+          studentA: { name: pair.studentA.name, regNo: pair.studentA.regNo },
+          studentB: { name: pair.studentB.name, regNo: pair.studentB.regNo },
+          overallSimilarity: pair.overallSimilarity,
+          matchedQuestionsCount: pair.matchedQuestionsCount,
+          riskLevel: pair.riskLevel,
+          teacherNotes: notes,
+          penaltyTarget: target,
+          decidedAt: new Date().toISOString(),
+          questions: pair.questions.map((q) => ({
+            questionNumber: q.questionNumber,
+            questionText: q.questionText,
+            similarityScore: q.similarityScore,
+            semanticScore: q.semanticScore,
+            lexicalScore: q.lexicalScore,
+            verbatimRatio: q.verbatimRatio,
+            riskLevel: q.riskLevel,
+            answerA: q.answerA,
+            answerB: q.answerB,
+            matchedSegments: q.matchedSegments,
+          })),
+        },
+      });
+
+      // Refresh data in real-time
+      const [refreshedResults, refreshedSimilarity] = await Promise.all([
+        evaluationApi.getResults(examId),
+        evaluationApi.getSimilarityFlags(examId),
+      ]);
+
+      const awaiting = refreshedResults.filter((r) => r.status === 'awaiting_approval');
+      setResults(awaiting);
+
+      if (Array.isArray(refreshedSimilarity)) {
+        setSimilarities(refreshedSimilarity);
+      } else if (
+        refreshedSimilarity &&
+        Array.isArray((refreshedSimilarity as SimilarityReport).flaggedPairs)
+      ) {
+        const rep = refreshedSimilarity as SimilarityReport;
+        setSimilarities(rep.flaggedPairs);
+        if (rep.groupedPairs && Array.isArray(rep.groupedPairs)) {
+          setGroupedPairs(rep.groupedPairs);
+        }
+      }
+
+      setConfirmCheatingOpen(false);
+      setComparisonModalOpen(false);
+      setNotice(
+        action === 'confirm_cheating'
+          ? `Academic integrity violation recorded: awarded 0 marks to ${
+              res.penalizedStudents?.join(', ') || 'selected student(s)'
+            }. Results and total scores updated in real-time.`
+          : 'Similarity flag dismissed. Original marks remain intact.',
+      );
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to record similarity decision.',
+      );
+    } finally {
+      setSubmittingPenalty(false);
+    }
+  };
 
   const filteredResults = results.filter((result) => {
     if (filter === 'flagged') return result.entries.some((e) => e.isFlagged);
@@ -627,6 +798,152 @@ function AIReviewContent() {
             <p className="text-sm text-[#888888]">Loading results...</p>
           </div>
         </Card>
+      ) : filter === 'high-similarity' ? (
+        <div className="space-y-6">
+          {/* Similarity Hub Header */}
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
+                  <ShieldAlert size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-amber-950">
+                    Dual-Layer Academic Integrity &amp; Plagiarism Detection
+                  </h3>
+                  <p className="mt-1 text-xs text-amber-900/90 leading-relaxed max-w-3xl">
+                    Our dual-layer engine matches both <strong>SBERT semantic meaning</strong> and <strong>multi-word verbatim n-grams (3-gram &amp; 4-gram)</strong> with typo propagation detection.
+                    Legitimate standard answers have high semantic similarity but low verbatim sequence overlap; copied papers have identical phrasing, matching example order, or shared OCR corruptions.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-white text-amber-900 border border-amber-300">
+                  {groupedPairs.length} Flagged Pair{groupedPairs.length === 1 ? '' : 's'}
+                </span>
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200">
+                  {groupedPairs.filter((p) => p.riskLevel === 'critical').length} Critical Risk
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {groupedPairs.length === 0 ? (
+            <Card>
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <CheckCircle2 size={36} className="text-emerald-500" />
+                <p className="text-base font-semibold text-[#1A1A1A]">No Plagiarism or Copying Detected</p>
+                <p className="text-xs text-[#888888] max-w-md text-center">
+                  All candidate answers have been evaluated. No students share suspicious multi-word sentence structures or identical example sequences.
+                </p>
+              </div>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {groupedPairs.map((pair) => {
+                const isCritical = pair.riskLevel === 'critical' || pair.overallSimilarity >= 0.80;
+                const isZeroed =
+                  pair.studentA.cheatingStatus === 'confirmed_cheating' ||
+                  pair.studentB.cheatingStatus === 'confirmed_cheating';
+
+                return (
+                  <div
+                    key={pair.pairKey}
+                    className="rounded-2xl border border-[#E8DCC8] bg-white p-5 shadow-sm transition-all hover:border-[#005461]/40 space-y-4"
+                  >
+                    {/* Pair Header */}
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 bg-[#F0F8FA] px-3.5 py-2 rounded-xl border border-[#005461]/20">
+                          <Users size={16} className="text-[#005461]" />
+                          <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-[#1A1A1A]">
+                            <span>{pair.studentA.name}</span>
+                            <span className="text-xs font-normal text-[#666666]">({pair.studentA.regNo})</span>
+                            <ArrowRightLeft size={13} className="text-amber-600 mx-1" />
+                            <span>{pair.studentB.name}</span>
+                            <span className="text-xs font-normal text-[#666666]">({pair.studentB.regNo})</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isZeroed ? (
+                          <Badge variant="danger" className="text-xs">
+                            <ShieldAlert size={12} className="mr-1 inline" />
+                            Confirmed Cheating · 0 Marks Awarded
+                          </Badge>
+                        ) : isCritical ? (
+                          <Badge variant="danger" className="text-xs">
+                            <ShieldAlert size={12} className="mr-1 inline" />
+                            Critical Match · {Math.round(pair.overallSimilarity * 100)}% Copied
+                          </Badge>
+                        ) : (
+                          <Badge variant="warning" className="text-xs">
+                            <TrendingDown size={12} className="mr-1 inline" />
+                            Suspicious · {Math.round(pair.overallSimilarity * 100)}% Match
+                          </Badge>
+                        )}
+                        <span className="text-xs text-[#888888] font-medium">
+                          {pair.matchedQuestionsCount} question(s) flagged
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Matched Questions Preview Pills */}
+                    <div className="flex flex-wrap gap-2">
+                      {pair.questions.map((q) => (
+                        <div
+                          key={q.questionId}
+                          className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-1 text-xs"
+                        >
+                          <span className="font-bold text-amber-950">Q{q.questionNumber}:</span>
+                          <span className="text-amber-900 truncate max-w-[220px]" title={q.questionText}>
+                            {q.questionText}
+                          </span>
+                          <span className="font-black text-amber-800">
+                            {Math.round(q.similarityScore * 100)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#F5EFE6]">
+                      <div className="text-xs text-[#888888]">
+                        Open side-by-side comparison to view text highlights and confirm or dismiss.
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedPair(pair);
+                            setActiveQuestionTab('all');
+                            setComparisonModalOpen(true);
+                          }}
+                        >
+                          <ArrowRightLeft size={14} className="mr-1.5 text-[#005461]" />
+                          Compare Answers Side-by-Side
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedPair(pair);
+                            setConfirmCheatingOpen(true);
+                          }}
+                        >
+                          <ShieldAlert size={14} className="mr-1.5" />
+                          Confirm Cheating (Award 0)
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       ) : filteredResults.length === 0 ? (
         <Card>
           <div className="flex flex-col items-center justify-center py-16 gap-3">
@@ -635,7 +952,6 @@ function AIReviewContent() {
             <p className="text-xs text-[#888888]">
               {filter === 'all' && (results.length > 0 ? 'All questions have been reviewed. Publish when ready.' : 'No results pending review')}
               {filter === 'flagged' && 'No flagged answers found'}
-              {filter === 'high-similarity' && 'No high similarity matches'}
             </p>
           </div>
         </Card>
@@ -1306,6 +1622,338 @@ function AIReviewContent() {
                 disabled={applyingGrace || !graceMarksValue}
               >
                 Apply Grace Marks
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Side-by-Side Answer Comparison Modal */}
+      {comparisonModalOpen && selectedPair && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => setComparisonModalOpen(false)}
+        >
+          <div
+            className="relative flex flex-col max-h-[94vh] w-full max-w-5xl rounded-2xl bg-white shadow-2xl overflow-hidden border border-[#E8DCC8]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex flex-wrap items-start justify-between gap-3 p-5 border-b border-[#E8DCC8] bg-[#FAF8F5]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldAlert size={20} className="text-[#005461]" />
+                  <h3 className="text-lg font-bold text-[#1A1A1A]">
+                    Academic Integrity Review · Side-by-Side Comparison
+                  </h3>
+                </div>
+                <p className="mt-1 text-xs text-[#666666]">
+                  Comparing answers between <strong className="text-[#1A1A1A]">{selectedPair.studentA.name}</strong> ({selectedPair.studentA.regNo}) and <strong className="text-[#1A1A1A]">{selectedPair.studentB.name}</strong> ({selectedPair.studentB.regNo}).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-black bg-red-100 text-red-800 border border-red-200">
+                  {Math.round(selectedPair.overallSimilarity * 100)}% Overall Match
+                </span>
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-[#005461] text-white">
+                  {selectedPair.matchedQuestionsCount} Flagged Question{selectedPair.matchedQuestionsCount === 1 ? '' : 's'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setComparisonModalOpen(false)}
+                  className="rounded-lg p-1.5 text-[#666666] hover:bg-[#F5EFE6] hover:text-[#1A1A1A] ml-2"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Question Filter Tabs */}
+            {selectedPair.questions.length > 1 && (
+              <div className="flex items-center gap-2 px-5 py-2.5 bg-white border-b border-[#E8DCC8] overflow-x-auto">
+                <span className="text-xs font-bold text-[#888888] uppercase tracking-wider mr-1">
+                  View:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveQuestionTab('all')}
+                  className={cn(
+                    'px-3 py-1 rounded-lg text-xs font-medium transition-colors',
+                    activeQuestionTab === 'all'
+                      ? 'bg-[#005461] text-white'
+                      : 'bg-[#F5EFE6] text-[#444444] hover:bg-[#E8DCC8]'
+                  )}
+                >
+                  All Questions ({selectedPair.questions.length})
+                </button>
+                {selectedPair.questions.map((q) => (
+                  <button
+                    key={q.questionId}
+                    type="button"
+                    onClick={() => setActiveQuestionTab(q.questionNumber)}
+                    className={cn(
+                      'px-3 py-1 rounded-lg text-xs font-medium transition-colors',
+                      activeQuestionTab === q.questionNumber
+                        ? 'bg-[#005461] text-white'
+                        : 'bg-[#F5EFE6] text-[#444444] hover:bg-[#E8DCC8]'
+                    )}
+                  >
+                    Question {q.questionNumber} ({Math.round(q.similarityScore * 100)}%)
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Modal Body: Scrollable Question Comparisons */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-[#FAF8F5]">
+              {selectedPair.questions
+                .filter((q) => activeQuestionTab === 'all' || activeQuestionTab === q.questionNumber)
+                .map((q) => {
+                  return (
+                    <div
+                      key={q.questionId}
+                      className="rounded-2xl border border-[#E8DCC8] bg-white p-5 shadow-sm space-y-4"
+                    >
+                      {/* Question Bar */}
+                      <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-[#F5EFE6]">
+                        <div className="flex-1 min-w-0">
+                          <span className="inline-block px-2.5 py-0.5 rounded text-xs font-bold bg-[#005461] text-white mb-1">
+                            Question {q.questionNumber}
+                          </span>
+                          <h4 className="text-sm font-bold text-[#1A1A1A]">
+                            {q.questionText}
+                          </h4>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-amber-100 text-amber-900 border border-amber-200">
+                            Composite: {Math.round(q.similarityScore * 100)}%
+                          </span>
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-900 border border-blue-200">
+                            Semantic: {Math.round((q.semanticScore || q.similarityScore) * 100)}%
+                          </span>
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-900 border border-emerald-200">
+                            Verbatim: {Math.round((q.verbatimRatio || 0) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Dual-Pane Side-by-Side Comparison */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Student A Pane */}
+                        <div className="rounded-xl border border-blue-200 bg-white overflow-hidden shadow-sm">
+                          <div className="bg-blue-50/70 px-4 py-2.5 border-b border-blue-200 flex items-center justify-between">
+                            <span className="text-xs font-bold text-blue-950">
+                              {selectedPair.studentA.name}
+                            </span>
+                            <span className="text-[11px] font-medium text-blue-800">
+                              Roll: {selectedPair.studentA.regNo}
+                            </span>
+                          </div>
+                          <div className="p-4 text-xs leading-relaxed max-h-[300px] overflow-y-auto">
+                            <HighlightedAnswerText
+                              text={q.answerA}
+                              segments={q.matchedSegments}
+                              side="A"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Student B Pane */}
+                        <div className="rounded-xl border border-amber-200 bg-white overflow-hidden shadow-sm">
+                          <div className="bg-amber-50/70 px-4 py-2.5 border-b border-amber-200 flex items-center justify-between">
+                            <span className="text-xs font-bold text-amber-950">
+                              {selectedPair.studentB.name}
+                            </span>
+                            <span className="text-[11px] font-medium text-amber-800">
+                              Roll: {selectedPair.studentB.regNo}
+                            </span>
+                          </div>
+                          <div className="p-4 text-xs leading-relaxed max-h-[300px] overflow-y-auto">
+                            <HighlightedAnswerText
+                              text={q.answerB}
+                              segments={q.matchedSegments}
+                              side="B"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Highlights Key & Analysis Box */}
+                      <div className="rounded-xl bg-[#F5EFE6]/60 border border-[#E8DCC8] p-3 text-xs text-[#555555] flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-3.5 h-3.5 rounded bg-amber-200 border border-amber-400"></span>
+                          <span><strong>Yellow highlighted spans</strong> show verbatim identical or near-identical matching phrases.</span>
+                        </div>
+                        <span className="text-[11px] text-[#777777]">
+                          {q.matchedSegments?.length || 0} matching sequence block(s) detected
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Modal Sticky Bottom Action Footer */}
+            <div className="p-4 border-t border-[#E8DCC8] bg-white flex flex-wrap items-center justify-between gap-3">
+              <Button
+                variant="ghost"
+                type="button"
+                onClick={() => handleDecideSimilarity(selectedPair, 'dismiss')}
+                loading={submittingPenalty}
+                disabled={submittingPenalty}
+              >
+                <Check size={14} className="mr-1.5 text-emerald-600" />
+                Dismiss Flag (Accept as Independent)
+              </Button>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setComparisonModalOpen(false)}
+                >
+                  Close
+                </Button>
+                <Button
+                  variant="danger"
+                  type="button"
+                  onClick={() => setConfirmCheatingOpen(true)}
+                  disabled={submittingPenalty}
+                >
+                  <ShieldAlert size={14} className="mr-1.5" />
+                  Confirm Cheating &amp; Award Zero (0) Marks
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Cheating Penalty Dialog */}
+      {confirmCheatingOpen && selectedPair && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => setConfirmCheatingOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-4 border border-red-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-[#E8DCC8]">
+              <div className="flex items-center gap-2 text-red-700">
+                <ShieldAlert size={20} />
+                <h3 className="text-base font-bold text-[#1A1A1A]">Confirm Cheating &amp; Impose Penalty</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmCheatingOpen(false)}
+                className="rounded-lg p-1 text-[#666666] hover:bg-[#F5EFE6]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-[#555555] leading-relaxed">
+              Applying this penalty will award <strong>zero (0) marks</strong> for the assessment, record an official academic integrity violation audit, attach the side-by-side evidence report, and notify the student(s).
+            </p>
+
+            <div className="space-y-3 pt-1">
+              <label className="text-xs font-bold text-[#1A1A1A] block">
+                Select penalty recipient:
+              </label>
+
+              <div className="space-y-2 text-xs">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-[#E8DCC8] hover:border-[#005461] cursor-pointer transition-colors bg-[#FAF8F5]">
+                  <input
+                    type="radio"
+                    name="penaltyTarget"
+                    value="both"
+                    checked={penaltyTarget === 'both'}
+                    onChange={() => setPenaltyTarget('both')}
+                    className="mt-0.5 accent-red-600"
+                  />
+                  <div>
+                    <span className="font-bold text-[#1A1A1A] block">
+                      Award Zero to Both Students (Recommended)
+                    </span>
+                    <span className="text-[#666666]">
+                      {selectedPair.studentA.name} ({selectedPair.studentA.regNo}) &amp; {selectedPair.studentB.name} ({selectedPair.studentB.regNo})
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-[#E8DCC8] hover:border-[#005461] cursor-pointer transition-colors">
+                  <input
+                    type="radio"
+                    name="penaltyTarget"
+                    value="student_b"
+                    checked={penaltyTarget === 'student_b'}
+                    onChange={() => setPenaltyTarget('student_b')}
+                    className="mt-0.5 accent-red-600"
+                  />
+                  <div>
+                    <span className="font-bold text-[#1A1A1A] block">
+                      Award Zero to {selectedPair.studentB.name} Only
+                    </span>
+                    <span className="text-[#666666]">
+                      Roll: {selectedPair.studentB.regNo} (If Student B copied without permission)
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-[#E8DCC8] hover:border-[#005461] cursor-pointer transition-colors">
+                  <input
+                    type="radio"
+                    name="penaltyTarget"
+                    value="student_a"
+                    checked={penaltyTarget === 'student_a'}
+                    onChange={() => setPenaltyTarget('student_a')}
+                    className="mt-0.5 accent-red-600"
+                  />
+                  <div>
+                    <span className="font-bold text-[#1A1A1A] block">
+                      Award Zero to {selectedPair.studentA.name} Only
+                    </span>
+                    <span className="text-[#666666]">
+                      Roll: {selectedPair.studentA.regNo}
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="space-y-1 pt-2">
+                <label className="text-xs font-bold text-[#1A1A1A]">
+                  Instructor Penalty Explanation / Reason:
+                </label>
+                <textarea
+                  value={cheatingNotes}
+                  onChange={(e) => setCheatingNotes(e.target.value)}
+                  rows={3}
+                  className="w-full text-xs rounded-xl border border-[#E8DCC8] p-3 focus:outline-none focus:border-[#005461]"
+                  placeholder="Explain the academic integrity violation..."
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-[#E8DCC8]">
+              <Button
+                variant="ghost"
+                type="button"
+                onClick={() => setConfirmCheatingOpen(false)}
+                disabled={submittingPenalty}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                type="button"
+                onClick={() => handleDecideSimilarity(selectedPair, 'confirm_cheating')}
+                loading={submittingPenalty}
+                disabled={submittingPenalty}
+              >
+                <ShieldAlert size={14} className="mr-1.5" />
+                Confirm Cheating &amp; Award 0 Marks
               </Button>
             </div>
           </div>

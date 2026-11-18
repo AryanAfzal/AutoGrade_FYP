@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from services.similarity import detect_similarity, summarise_flags
+from services.similarity import detect_similarity, summarise_flags, group_flagged_into_pairs
 
 router = APIRouter()
 
@@ -28,7 +28,7 @@ class StudentAnswerSet(BaseModel):
 class SimilarityRequest(BaseModel):
     questions:      list[QuestionInfo]
     studentAnswers: list[StudentAnswerSet]
-    threshold:      Optional[float] = 0.92
+    threshold:      Optional[float] = 0.72
 
 
 @router.post("/similarity/{exam_id}")
@@ -38,6 +38,7 @@ async def get_similarity(exam_id: str, body: SimilarityRequest):
             "examId":       exam_id,
             "summary":      {"totalFlaggedPairs": 0, "studentsInvolved": [], "byQuestion": []},
             "flaggedPairs": [],
+            "groupedPairs": [],
         }
 
     questions_list = [q.model_dump() for q in body.questions]
@@ -54,12 +55,14 @@ async def get_similarity(exam_id: str, body: SimilarityRequest):
     flagged = detect_similarity(
         exam_questions=questions_list,
         all_student_answers=students_list,
-        threshold=body.threshold,
+        threshold=body.threshold if body.threshold is not None else 0.72,
     )
     summary = summarise_flags(flagged)
+    grouped = group_flagged_into_pairs(flagged)
 
     return {
         "examId":       exam_id,
         "summary":      summary,
         "flaggedPairs": flagged,
+        "groupedPairs": grouped,
     }

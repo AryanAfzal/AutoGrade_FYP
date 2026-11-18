@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  ArrowRightLeft,
   Award,
   BookOpen,
   Calendar,
@@ -17,6 +18,7 @@ import {
   HelpCircle,
   MessageSquare,
   Send,
+  ShieldAlert,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -48,6 +50,8 @@ export default function StudentResultsPage() {
   const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<any | null>(null);
 
   const refreshResultsAndNotifications = useCallback(async () => {
     try {
@@ -338,7 +342,12 @@ export default function StudentResultsPage() {
                         <span className="text-xs text-[#888888] font-medium">
                           {result.term}
                         </span>
-                        {isRecheckOpen ? (
+                        {result.cheatingStatus === 'confirmed_cheating' ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200">
+                            <ShieldAlert size={11} className="mr-1 inline" />
+                            Academic Integrity Violation
+                          </span>
+                        ) : isRecheckOpen ? (
                           <Badge variant="amber" className="text-[11px]">
                             <Clock3 size={10} className="mr-1 inline" />
                             Recheck open until {new Date(result.recheckDeadline!).toLocaleDateString()}
@@ -369,28 +378,41 @@ export default function StudentResultsPage() {
                     <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pt-3 sm:pt-0 border-t border-[#E8DCC8]/40 sm:border-t-0">
                       <div className="text-right">
                         <div className="flex items-baseline justify-end gap-1.5">
-                          <span className="text-2xl font-black text-[#005461]">
-                            {formatScore(result.totalMarks)}
+                          <span
+                            className={cn(
+                              'text-2xl font-black',
+                              result.cheatingStatus === 'confirmed_cheating'
+                                ? 'text-red-600'
+                                : 'text-[#005461]'
+                            )}
+                          >
+                            {result.cheatingStatus === 'confirmed_cheating' ? '0' : formatScore(result.totalMarks)}
                           </span>
                           <span className="text-sm font-semibold text-[#888888]">
                             / {result.maxMarks}
                           </span>
                         </div>
                         <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                          <span
-                            className={cn(
-                              'text-xs font-bold px-2 py-0.5 rounded-full',
-                              percentage >= 70
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : percentage >= 50
-                                ? 'bg-blue-100 text-[#005461]'
-                                : percentage >= 40
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-red-100 text-red-800'
-                            )}
-                          >
-                            {percentage}%
-                          </span>
+                          {result.cheatingStatus === 'confirmed_cheating' ? (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800">
+                              0% · Cheating Penalty
+                            </span>
+                          ) : (
+                            <span
+                              className={cn(
+                                'text-xs font-bold px-2 py-0.5 rounded-full',
+                                percentage >= 70
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : percentage >= 50
+                                  ? 'bg-blue-100 text-[#005461]'
+                                  : percentage >= 40
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-red-100 text-red-800'
+                              )}
+                            >
+                              {percentage}%
+                            </span>
+                          )}
                           <span className="text-[11px] text-[#888888]">Final mark</span>
                         </div>
                       </div>
@@ -406,7 +428,9 @@ export default function StudentResultsPage() {
                     <div
                       className={cn(
                         'h-full transition-all duration-500 rounded-full',
-                        percentage >= 70
+                        result.cheatingStatus === 'confirmed_cheating'
+                          ? 'bg-red-500'
+                          : percentage >= 70
                           ? 'bg-emerald-500'
                           : percentage >= 50
                           ? 'bg-[#005461]'
@@ -414,7 +438,7 @@ export default function StudentResultsPage() {
                           ? 'bg-amber-500'
                           : 'bg-red-500'
                       )}
-                      style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }}
+                      style={{ width: `${result.cheatingStatus === 'confirmed_cheating' ? 100 : Math.min(100, Math.max(0, percentage))}%` }}
                     />
                   </div>
                 </div>
@@ -422,6 +446,44 @@ export default function StudentResultsPage() {
                 {/* Expanded Details & Questions Accordion Content */}
                 {isExpanded && (
                   <div className="border-t border-[#E8DCC8] bg-[#FAF8F5] p-5 space-y-4">
+                    {/* Academic Integrity Violation Alert Card */}
+                    {result.cheatingStatus === 'confirmed_cheating' && (
+                      <div className="rounded-xl border border-red-300 bg-red-50/80 p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-700">
+                              <ShieldAlert size={20} />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-red-950">
+                                Academic Integrity Violation Confirmed
+                              </h4>
+                              <p className="mt-0.5 text-xs text-red-800 leading-relaxed max-w-2xl">
+                                Following teacher review, this paper was confirmed to have high unauthorized similarity or identical copied answers with another candidate. In accordance with university academic honesty guidelines, zero marks (0) have been awarded.
+                              </p>
+                              {result.cheatingPenaltyNotes && (
+                                <p className="mt-2 text-xs font-semibold text-red-900 bg-white/70 p-2.5 rounded-lg border border-red-200">
+                                  Instructor Remark: &quot;{result.cheatingPenaltyNotes}&quot;
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          {result.cheatingReport && (
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedReport(result.cheatingReport);
+                                setReportModalOpen(true);
+                              }}
+                            >
+                              <ShieldAlert size={14} className="mr-1.5" />
+                              View Evidence Report
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     {/* Recheck Information Banner */}
                     <div className="rounded-xl border border-[#E8DCC8] bg-white p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
                       <div className="flex items-center gap-2 text-[#444444]">
@@ -523,7 +585,11 @@ export default function StudentResultsPage() {
 
                             {/* Recheck Status / Request Action */}
                             <div className="pt-1">
-                              {question.recheckRequest ? (
+                              {result.cheatingStatus === 'confirmed_cheating' ? (
+                                <p className="text-xs text-red-600 font-medium italic">
+                                  Recheck requests are disabled due to confirmed academic integrity violation.
+                                </p>
+                              ) : question.recheckRequest ? (
                                 <div
                                   className={cn(
                                     'rounded-lg border p-3 text-xs',
@@ -653,6 +719,123 @@ export default function StudentResultsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Cheating Evidence Report Modal */}
+      {reportModalOpen && selectedReport && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => setReportModalOpen(false)}
+        >
+          <div
+            className="relative flex flex-col max-h-[92vh] w-full max-w-4xl rounded-2xl bg-white shadow-2xl overflow-hidden border border-red-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 p-5 border-b border-[#E8DCC8] bg-red-50/50">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-700">
+                  <ShieldAlert size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-red-950">
+                    Academic Integrity Investigation &amp; Evidence Report
+                  </h3>
+                  <p className="mt-0.5 text-xs text-red-800">
+                    Official evaluation log generated during instructor review.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setReportModalOpen(false)}
+                className="rounded-lg p-1.5 text-[#666666] hover:bg-[#F5EFE6]"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-[#FAF8F5]">
+              {/* Finding Summary */}
+              <div className="rounded-xl border border-red-200 bg-white p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-red-900 uppercase tracking-wider">
+                    Official Finding
+                  </span>
+                  <span className="text-xs text-[#888888]">
+                    Recorded: {selectedReport.decidedAt ? new Date(selectedReport.decidedAt).toLocaleString() : 'N/A'}
+                  </span>
+                </div>
+                <p className="text-xs font-semibold text-[#1A1A1A]">
+                  Instructor Determination: &quot;{selectedReport.teacherNotes || 'Unauthorized copying confirmed across descriptive answers.'}&quot;
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1 text-xs text-[#555555]">
+                  <span className="px-2.5 py-1 rounded-lg bg-red-50 text-red-800 font-bold border border-red-200">
+                    Penalty: 0 Marks Awarded
+                  </span>
+                  {selectedReport.overallSimilarity && (
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold border border-amber-200">
+                      Overall Match: {Math.round(selectedReport.overallSimilarity * 100)}%
+                    </span>
+                  )}
+                  {selectedReport.matchedWith && (
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 font-medium">
+                      Matched with candidate: {selectedReport.matchedWith}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Questions list */}
+              {selectedReport.questions && Array.isArray(selectedReport.questions) && (
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-[#1A1A1A] uppercase tracking-wider">
+                    Question-by-Question Match Evidence
+                  </h4>
+                  {selectedReport.questions.map((q: any, i: number) => (
+                    <div key={i} className="rounded-xl border border-[#E8DCC8] bg-white p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#F5EFE6]">
+                        <span className="text-xs font-bold text-[#005461]">
+                          Question {q.questionNumber}: {q.questionText}
+                        </span>
+                        <span className="text-xs font-black text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                          {Math.round(q.similarityScore * 100)}% Match
+                        </span>
+                      </div>
+
+                      <div className="rounded-lg bg-[#F9F9F9] p-3 text-xs border border-[#E8DCC8]">
+                        <p className="text-[10px] font-bold uppercase text-[#888888] mb-1">Your Submitted Answer</p>
+                        <p className="whitespace-pre-wrap leading-relaxed text-[#222222]">{q.answerA || q.answerB || 'No text extracted'}</p>
+                      </div>
+
+                      {q.matchedSegments && q.matchedSegments.length > 0 && (
+                        <div className="rounded-lg bg-amber-50/70 border border-amber-200 p-2.5 text-xs text-amber-950">
+                          <p className="font-bold mb-1 text-[11px]">Identified Matching Key Sentences / Fragments:</p>
+                          <ul className="list-disc list-inside space-y-1 text-[11px] text-amber-900">
+                            {q.matchedSegments.slice(0, 5).map((seg: any, idx: number) => (
+                              <li key={idx} className="truncate">
+                                &quot;{seg.textA || seg.textB}&quot;
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-[#E8DCC8] bg-white flex justify-end">
+              <Button variant="secondary" onClick={() => setReportModalOpen(false)}>
+                Close Report
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

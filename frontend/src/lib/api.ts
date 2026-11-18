@@ -585,7 +585,31 @@ export const evaluationApi = {
     const res = await fetch(`${BASE_URL}/evaluation/${examId}/similarity`, {
       headers: authHeaders(),
     });
-    return handleResponse<import('@/types').SimilarityFlag[]>(res);
+    return handleResponse<import('@/types').SimilarityReport | import('@/types').SimilarityFlag[]>(res);
+  },
+
+  decideSimilarity: async (
+    examId: string,
+    data: {
+      action: 'confirm_cheating' | 'dismiss';
+      penaltyTarget?: 'both' | 'student_a' | 'student_b';
+      studentAResultId?: string;
+      studentBResultId?: string;
+      studentARegNo?: string;
+      studentBRegNo?: string;
+      teacherNotes?: string;
+      reportData?: any;
+    },
+  ) => {
+    const res = await fetch(`${BASE_URL}/evaluation/${examId}/similarity/decide`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<{
+      message: string;
+      penalizedStudents?: string[];
+    }>(res);
   },
 
   getOmrImage: async (examId: string, sheetId: string, signal?: AbortSignal) => {

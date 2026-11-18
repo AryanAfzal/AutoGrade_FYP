@@ -18,6 +18,7 @@ import { ReviewAnswerEntryDto } from './dto/review-answer-entry.dto';
 import { AddGraceMarksDto } from './dto/add-grace-marks.dto';
 import { CreateRecheckRequestDto } from './dto/create-recheck-request.dto';
 import { DecideRecheckRequestDto } from './dto/decide-recheck-request.dto';
+import { DecideSimilarityDto } from './dto/decide-similarity.dto';
 import { User } from '../users/entities/user.entity';
 import axios, { AxiosError, isAxiosError } from 'axios';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
@@ -128,6 +129,9 @@ export class EvaluationService {
           ) / 100,
       reviewCompletedAt: result.reviewCompletedAt,
       status: result.status,
+      cheatingStatus: result.cheatingStatus || 'clean',
+      cheatingPenaltyNotes: result.cheatingPenaltyNotes || null,
+      cheatingReport: result.cheatingReport || null,
       ocrEngine: result.answerSheet.ocrEngine,
       hasOmrImage: Boolean(result.answerSheet.omrAnnotatedPath),
       entries: [...result.entries]
@@ -204,6 +208,9 @@ export class EvaluationService {
             ? Math.round(result.totalAiMark * 100) / 100
             : null),
       maxMarks: result.totalMaxMarks,
+      cheatingStatus: result.cheatingStatus || 'clean',
+      cheatingPenaltyNotes: result.cheatingPenaltyNotes || null,
+      cheatingReport: result.cheatingReport || null,
       publishedAt: result.publishedAt,
       recheckDeadline: result.answerSheet.exam.recheckDeadline,
       questions: result.entries.map((entry) => ({
@@ -832,11 +839,11 @@ export class EvaluationService {
     });
 
     if (results.length < 2) {
-      // Can't detect similarity with fewer than 2 students
       return {
         examId,
         summary:      { totalFlaggedPairs: 0, studentsInvolved: [], byQuestion: [] },
         flaggedPairs: [],
+        groupedPairs: [],
       };
     }
 
@@ -845,25 +852,170 @@ export class EvaluationService {
       studentName:    result.answerSheet.studentName,
       registrationNo: result.answerSheet.registrationNo,
       answersheetId:  result.answerSheet.id,
-      // Map AnswerEntry rows back into {questionNumber, answerText}
-      // The AI service matches by questionNumber (1-based index order)
       answers: result.entries.map((entry, idx) => ({
         questionNumber: idx + 1,
         answerText:     entry.studentAnswer,
       })),
     }));
 
-    // FIX: POST (not GET) with data in the body
     const response = await axios.post(
       `${process.env.AI_SERVICE_URL}/similarity/${examId}`,
       {
-        questions:      exam.questions,   // question list so AI knows types + text
-        studentAnswers: studentAnswers,   // per-student answer arrays
-        threshold:      0.92,             // configurable similarity cutoff
+        questions:      exam.questions,
+        studentAnswers: studentAnswers,
+        threshold:      0.72,
       },
     );
 
-    return response.data;
+    const data = response.data;
+    const resultMap = new Map(results.map((r) => [r.answerSheet.registrationNo, r]));
+
+    // Attach studentResult IDs and cheating status to grouped pairs
+    if (data.groupedPairs && Array.isArray(data.groupedPairs)) {
+      data.groupedPairs = data.groupedPairs.map((pair: any) => {
+        const resA = resultMap.get(pair.studentA?.regNo);
+        const resB = resultMap.get(pair.studentB?.regNo);
+        return {
+          ...pair,
+          studentA: {
+            ...pair.studentA,
+            resultId: resA?.id,
+            cheatingStatus: resA?.cheatingStatus || 'clean',
+            totalApprovedMark: resA?.totalApprovedMark,
+            totalMaxMarks: resA?.totalMaxMarks,
+          },
+          studentB: {
+            ...pair.studentB,
+            resultId: resB?.id,
+            cheatingStatus: resB?.cheatingStatus || 'clean',
+            totalApprovedMark: resB?.totalApprovedMark,
+            totalMaxMarks: resB?.totalMaxMarks,
+          },
+        };
+      });
+    }
+
+    return data;
+  }
+
+  async decideSimilarity(examId: string, dto: DecideSimilarityDto, user: User) {
+    const exam = await this.getOwnedExam(examId, user);
+
+    const results = await this.resultRepo.find({
+      where: { answerSheet: { exam: { id: examId } } },
+      relations: ['entries', 'answerSheet'],
+    });
+
+    const studentAResult = results.find(
+      (r) =>
+        (dto.studentAResultId && r.id === dto.studentAResultId) ||
+        (dto.studentARegNo &&
+          r.answerSheet.registrationNo?.trim().toLowerCase() ===
+            dto.studentARegNo.trim().toLowerCase()),
+    );
+
+    const studentBResult = results.find(
+      (r) =>
+        (dto.studentBResultId && r.id === dto.studentBResultId) ||
+        (dto.studentBRegNo &&
+          r.answerSheet.registrationNo?.trim().toLowerCase() ===
+            dto.studentBRegNo.trim().toLowerCase()),
+    );
+
+    if (dto.action === 'dismiss') {
+      if (studentAResult && studentAResult.cheatingStatus !== 'confirmed_cheating') {
+        studentAResult.cheatingStatus = 'clean';
+        await this.resultRepo.save(studentAResult);
+      }
+      if (studentBResult && studentBResult.cheatingStatus !== 'confirmed_cheating') {
+        studentBResult.cheatingStatus = 'clean';
+        await this.resultRepo.save(studentBResult);
+      }
+      return { message: 'Similarity flag dismissed successfully.' };
+    }
+
+    // Action: confirm_cheating
+    const targetResults: StudentResult[] = [];
+    const penaltyTarget = dto.penaltyTarget || 'both';
+
+    if ((penaltyTarget === 'both' || penaltyTarget === 'student_a') && studentAResult) {
+      targetResults.push(studentAResult);
+    }
+    if ((penaltyTarget === 'both' || penaltyTarget === 'student_b') && studentBResult) {
+      targetResults.push(studentBResult);
+    }
+
+    if (targetResults.length === 0) {
+      throw new NotFoundException('No target student results found for cheating penalty.');
+    }
+
+    const userRepo = this.notificationRepo.manager.getRepository(User);
+    const entryRepo = this.notificationRepo.manager.getRepository(AnswerEntry);
+    const auditRepo = this.notificationRepo.manager.getRepository(ReviewAudit);
+
+    const teacherName = user.fullName || 'Teacher';
+    const notes =
+      dto.teacherNotes?.trim() ||
+      'Academic integrity violation: unauthorized copying confirmed by instructor.';
+
+    for (const res of targetResults) {
+      res.cheatingStatus = 'confirmed_cheating';
+      res.cheatingPenaltyNotes = notes;
+      res.cheatingReport = dto.reportData || {
+        penaltyTarget,
+        teacherNotes: notes,
+        decidedAt: new Date().toISOString(),
+        decidedBy: teacherName,
+        matchedWith:
+          res.id === studentAResult?.id
+            ? studentBResult?.answerSheet?.registrationNo
+            : studentAResult?.answerSheet?.registrationNo,
+      };
+      res.totalApprovedMark = 0;
+      res.reviewCompletedAt = new Date();
+
+      for (const entry of res.entries) {
+        entry.approvedMark = 0;
+        entry.reviewStatus = 'overridden';
+        await entryRepo.save(entry);
+
+        const audit = auditRepo.create({
+          answerEntry: entry,
+          reviewer: user,
+          action: 'override',
+          originalAiMark: entry.aiMark,
+          finalMark: 0,
+          comment: `[Cheating Penalty] ${notes}`,
+          reviewedAt: new Date(),
+        });
+        await auditRepo.save(audit);
+      }
+
+      await this.resultRepo.save(res);
+
+      // Create notification for student if their account exists
+      const studentRoll = res.answerSheet.registrationNo?.trim().toLowerCase();
+      if (studentRoll) {
+        const studentUser = await userRepo
+          .createQueryBuilder('u')
+          .where('LOWER(TRIM(u.rollNumber)) = :roll', { roll: studentRoll })
+          .getOne();
+
+        if (studentUser) {
+          const notification = this.notificationRepo.create({
+            user: studentUser,
+            title: `Academic Integrity Notice · ${exam.title}`,
+            message: `Following teacher review for exam "${exam.title}", unauthorized similarity/copying was confirmed in your paper. In accordance with academic integrity guidelines, zero marks (0) have been awarded for this assessment. Reason: ${notes}`,
+          });
+          await this.notificationRepo.save(notification);
+        }
+      }
+    }
+
+    return {
+      message: `Confirmed cheating and awarded 0 marks to ${targetResults.length} student(s).`,
+      penalizedStudents: targetResults.map((r) => r.answerSheet.registrationNo),
+    };
   }
 
   // ── publishResults ────────────────────────────────────────────────────────

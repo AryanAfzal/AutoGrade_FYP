@@ -15,6 +15,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { EvaluationService } from './evaluation.service';
 import { ReviewAnswerEntryDto } from './dto/review-answer-entry.dto';
 import { AddGraceMarksDto } from './dto/add-grace-marks.dto';
+import { DecideSimilarityDto } from './dto/decide-similarity.dto';
 
 @Controller('evaluation')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -95,5 +96,14 @@ export class EvaluationController {
     @Request() req,
   ) {
     return this.evaluationService.addGraceMarks(examId, dto, req.user);
+  }
+
+  @Post(':examId/similarity/decide')
+  decideSimilarity(
+    @Param('examId') examId: string,
+    @Body() dto: DecideSimilarityDto,
+    @Request() req,
+  ) {
+    return this.evaluationService.decideSimilarity(examId, dto, req.user);
   }
 }
