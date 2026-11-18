@@ -16,7 +16,7 @@ export class ReviewAnswerEntryDto {
   @Min(0)
   mark?: number;
 
-  @ValidateIf((request: ReviewAnswerEntryDto) => request.action === 'override')
+  @IsOptional()
   @IsString()
   comment?: string;
 
@@ -24,3 +24,4 @@ export class ReviewAnswerEntryDto {
   @IsString()
   approvalComment?: string;
 }
+

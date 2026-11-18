@@ -15,8 +15,10 @@ import { RecheckRequest } from './entities/recheck-request.entity';
 import { RecheckAudit } from './entities/recheck-audit.entity';
 import { UserNotification } from './entities/user-notification.entity';
 import { ReviewAnswerEntryDto } from './dto/review-answer-entry.dto';
+import { AddGraceMarksDto } from './dto/add-grace-marks.dto';
 import { CreateRecheckRequestDto } from './dto/create-recheck-request.dto';
 import { DecideRecheckRequestDto } from './dto/decide-recheck-request.dto';
+import { DecideSimilarityDto } from './dto/decide-similarity.dto';
 import { User } from '../users/entities/user.entity';
 import axios, { AxiosError, isAxiosError } from 'axios';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
@@ -117,9 +119,19 @@ export class EvaluationService {
       registrationNo: result.answerSheet.registrationNo,
       totalAiMark: result.totalAiMark,
       totalMaxMarks: result.totalMaxMarks,
-      totalApprovedMark: result.totalApprovedMark,
+      totalApprovedMark: typeof result.totalApprovedMark === 'number'
+        ? result.totalApprovedMark
+        : Math.round(
+            result.entries.reduce(
+              (sum, e) => sum + (typeof e.approvedMark === 'number' ? e.approvedMark : e.aiMark),
+              0,
+            ) * 100,
+          ) / 100,
       reviewCompletedAt: result.reviewCompletedAt,
       status: result.status,
+      cheatingStatus: result.cheatingStatus || 'clean',
+      cheatingPenaltyNotes: result.cheatingPenaltyNotes || null,
+      cheatingReport: result.cheatingReport || null,
       ocrEngine: result.answerSheet.ocrEngine,
       hasOmrImage: Boolean(result.answerSheet.omrAnnotatedPath),
       entries: [...result.entries]
@@ -190,8 +202,15 @@ export class EvaluationService {
       subject: result.answerSheet.exam.course,
       term: result.answerSheet.exam.term,
       rollNumber: result.answerSheet.registrationNo,
-      totalMarks: result.totalApprovedMark,
+      totalMarks: result.totalApprovedMark !== null && result.totalApprovedMark !== undefined
+        ? Math.round(result.totalApprovedMark * 100) / 100
+        : (result.totalAiMark !== null && result.totalAiMark !== undefined
+            ? Math.round(result.totalAiMark * 100) / 100
+            : null),
       maxMarks: result.totalMaxMarks,
+      cheatingStatus: result.cheatingStatus || 'clean',
+      cheatingPenaltyNotes: result.cheatingPenaltyNotes || null,
+      cheatingReport: result.cheatingReport || null,
       publishedAt: result.publishedAt,
       recheckDeadline: result.answerSheet.exam.recheckDeadline,
       questions: result.entries.map((entry) => ({
@@ -207,7 +226,9 @@ export class EvaluationService {
           : null,
         questionText: entry.questionText,
         studentAnswer: entry.studentAnswer || 'No answer was extracted for this question.',
-        mark: entry.approvedMark,
+        mark: typeof entry.approvedMark === 'number'
+          ? Math.round(entry.approvedMark * 100) / 100
+          : (typeof entry.aiMark === 'number' ? Math.round(entry.aiMark * 100) / 100 : null),
         maxMarks: entry.maxMarks,
         feedback: entry.feedback,
       })),
@@ -216,8 +237,8 @@ export class EvaluationService {
 
   async submitRecheckRequest(dto: CreateRecheckRequestDto, user: User) {
     const justification = dto.justification.trim();
-    if (justification.length < 50) {
-      throw new BadRequestException('Justification must be at least 50 characters.');
+    if (justification.length < 10) {
+      throw new BadRequestException('Justification must be at least 10 characters.');
     }
 
     return this.resultRepo.manager.transaction(async (manager) => {
@@ -443,10 +464,18 @@ export class EvaluationService {
   }
 
   async getStudentNotifications(user: User) {
-    return this.notificationRepo.find({
+    const list = await this.notificationRepo.find({
       where: { user: { id: user.id } },
       order: { createdAt: 'DESC' },
       take: 30,
+    });
+    // Deduplicate identical notifications by title & message
+    const seen = new Set<string>();
+    return list.filter((n) => {
+      const key = `${n.title.trim()}__${n.message.trim()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
   }
 
@@ -682,7 +711,11 @@ export class EvaluationService {
       }
 
       let finalMark = entry.aiMark;
-      let comment: string | null = dto.approvalComment?.trim() || null;
+      let comment: string =
+        dto.comment?.trim() ||
+        dto.approvalComment?.trim() ||
+        (dto.action === 'override' ? 'Teacher revised mark' : 'AI mark approved');
+
       if (dto.action === 'override') {
         if (typeof dto.mark !== 'number' || !Number.isFinite(dto.mark)) {
           throw new BadRequestException('A valid revised mark is required.');
@@ -692,13 +725,7 @@ export class EvaluationService {
             `The revised mark cannot exceed ${entry.maxMarks}.`,
           );
         }
-        if (!dto.comment?.trim()) {
-          throw new BadRequestException(
-            'A comment is required when overriding an AI-assigned mark.',
-          );
-        }
         finalMark = Math.round(dto.mark * 100) / 100;
-        comment = dto.comment.trim();
         entry.reviewStatus = 'overridden';
       } else {
         entry.reviewStatus = 'approved';
@@ -726,19 +753,21 @@ export class EvaluationService {
       if (!result) {
         throw new NotFoundException('Evaluation result no longer exists.');
       }
-      result.totalApprovedMark = result.entries.every(
+      const allEntriesReviewed = result.entries.every(
         (resultEntry) =>
           resultEntry.reviewStatus !== 'pending' &&
           resultEntry.approvedMark !== null &&
           resultEntry.approvedMark !== undefined,
-      )
-        ? result.entries.reduce(
-            (sum, resultEntry) => sum + resultEntry.approvedMark,
-            0,
-          )
-        : null;
-      if (result.reviewCompletedAt) {
-        result.reviewCompletedAt = null;
+      );
+      result.totalApprovedMark = Math.round(
+        result.entries.reduce(
+          (sum, resultEntry) =>
+            sum + (typeof resultEntry.approvedMark === 'number' ? resultEntry.approvedMark : resultEntry.aiMark),
+          0,
+        ) * 100,
+      ) / 100;
+      if (allEntriesReviewed) {
+        result.reviewCompletedAt = new Date();
       }
       await resultRepo.save(result);
 
@@ -818,11 +847,11 @@ export class EvaluationService {
     });
 
     if (results.length < 2) {
-      // Can't detect similarity with fewer than 2 students
       return {
         examId,
         summary:      { totalFlaggedPairs: 0, studentsInvolved: [], byQuestion: [] },
         flaggedPairs: [],
+        groupedPairs: [],
       };
     }
 
@@ -831,25 +860,198 @@ export class EvaluationService {
       studentName:    result.answerSheet.studentName,
       registrationNo: result.answerSheet.registrationNo,
       answersheetId:  result.answerSheet.id,
-      // Map AnswerEntry rows back into {questionNumber, answerText}
-      // The AI service matches by questionNumber (1-based index order)
       answers: result.entries.map((entry, idx) => ({
         questionNumber: idx + 1,
         answerText:     entry.studentAnswer,
       })),
     }));
 
-    // FIX: POST (not GET) with data in the body
     const response = await axios.post(
       `${process.env.AI_SERVICE_URL}/similarity/${examId}`,
       {
-        questions:      exam.questions,   // question list so AI knows types + text
-        studentAnswers: studentAnswers,   // per-student answer arrays
-        threshold:      0.92,             // configurable similarity cutoff
+        questions:      exam.questions,
+        studentAnswers: studentAnswers,
+        threshold:      0.85, // Critical match threshold: only > 85%
       },
     );
 
-    return response.data;
+    const data = response.data;
+    const resultMap = new Map(results.map((r) => [r.answerSheet.registrationNo, r]));
+
+    // Filter to only include critical matches with percent greater than 85% (> 0.85)
+    if (data.flaggedPairs && Array.isArray(data.flaggedPairs)) {
+      data.flaggedPairs = data.flaggedPairs.filter((p: any) => p.similarityScore > 0.85);
+    }
+
+    // Attach studentResult IDs and cheating status to grouped pairs (only > 85%)
+    if (data.groupedPairs && Array.isArray(data.groupedPairs)) {
+      data.groupedPairs = data.groupedPairs
+        .filter((pair: any) => pair.overallSimilarity > 0.85)
+        .map((pair: any) => {
+          const resA = resultMap.get(pair.studentA?.regNo);
+          const resB = resultMap.get(pair.studentB?.regNo);
+          return {
+            ...pair,
+            studentA: {
+              ...pair.studentA,
+              resultId: resA?.id,
+              cheatingStatus: resA?.cheatingStatus || 'clean',
+              totalApprovedMark: resA?.totalApprovedMark,
+              totalMaxMarks: resA?.totalMaxMarks,
+            },
+            studentB: {
+              ...pair.studentB,
+              resultId: resB?.id,
+              cheatingStatus: resB?.cheatingStatus || 'clean',
+              totalApprovedMark: resB?.totalApprovedMark,
+              totalMaxMarks: resB?.totalMaxMarks,
+            },
+          };
+        });
+    }
+
+    return data;
+  }
+
+  async decideSimilarity(examId: string, dto: DecideSimilarityDto, user: User) {
+    const exam = await this.getOwnedExam(examId, user);
+
+    const results = await this.resultRepo.find({
+      where: { answerSheet: { exam: { id: examId } } },
+      relations: ['entries', 'answerSheet'],
+    });
+
+    const studentAResult = results.find(
+      (r) =>
+        (dto.studentAResultId && r.id === dto.studentAResultId) ||
+        (dto.studentARegNo &&
+          r.answerSheet.registrationNo?.trim().toLowerCase() ===
+            dto.studentARegNo.trim().toLowerCase()),
+    );
+
+    const studentBResult = results.find(
+      (r) =>
+        (dto.studentBResultId && r.id === dto.studentBResultId) ||
+        (dto.studentBRegNo &&
+          r.answerSheet.registrationNo?.trim().toLowerCase() ===
+            dto.studentBRegNo.trim().toLowerCase()),
+    );
+
+    if (dto.action === 'dismiss') {
+      if (studentAResult && studentAResult.cheatingStatus !== 'confirmed_cheating') {
+        studentAResult.cheatingStatus = 'clean';
+        await this.resultRepo.save(studentAResult);
+      }
+      if (studentBResult && studentBResult.cheatingStatus !== 'confirmed_cheating') {
+        studentBResult.cheatingStatus = 'clean';
+        await this.resultRepo.save(studentBResult);
+      }
+      return { message: 'Similarity flag dismissed successfully.' };
+    }
+
+    // Action: confirm_cheating
+    const targetResults: StudentResult[] = [];
+    const penaltyTarget = dto.penaltyTarget || 'both';
+
+    if ((penaltyTarget === 'both' || penaltyTarget === 'student_a') && studentAResult) {
+      targetResults.push(studentAResult);
+    }
+    if ((penaltyTarget === 'both' || penaltyTarget === 'student_b') && studentBResult) {
+      targetResults.push(studentBResult);
+    }
+
+    if (targetResults.length === 0) {
+      throw new NotFoundException('No target student results found for cheating penalty.');
+    }
+
+    const userRepo = this.notificationRepo.manager.getRepository(User);
+    const entryRepo = this.notificationRepo.manager.getRepository(AnswerEntry);
+    const auditRepo = this.notificationRepo.manager.getRepository(ReviewAudit);
+
+    const teacherName = user.fullName || 'Teacher';
+    const notes =
+      dto.teacherNotes?.trim() ||
+      'Academic integrity violation: unauthorized copying confirmed by instructor.';
+
+    const notifiedUserIds = new Set<string>();
+
+    for (const res of targetResults) {
+      res.cheatingStatus = 'confirmed_cheating';
+      res.cheatingPenaltyNotes = notes;
+      res.cheatingReport = dto.reportData || {
+        penaltyTarget,
+        teacherNotes: notes,
+        decidedAt: new Date().toISOString(),
+        decidedBy: teacherName,
+        matchedWith:
+          res.id === studentAResult?.id
+            ? studentBResult?.answerSheet?.registrationNo
+            : studentAResult?.answerSheet?.registrationNo,
+      };
+      res.totalApprovedMark = 0;
+      res.reviewCompletedAt = new Date();
+
+      for (const entry of res.entries) {
+        entry.approvedMark = 0;
+        entry.reviewStatus = 'overridden';
+        await entryRepo.save(entry);
+
+        const audit = auditRepo.create({
+          answerEntry: entry,
+          reviewer: user,
+          action: 'override',
+          originalAiMark: entry.aiMark,
+          finalMark: 0,
+          comment: `[Cheating Penalty] ${notes}`,
+          reviewedAt: new Date(),
+        });
+        await auditRepo.save(audit);
+      }
+
+      await this.resultRepo.save(res);
+
+      // Create notification for student if their account exists (prevent duplicates across multiple sheets or rolls)
+      const studentRoll = res.answerSheet.registrationNo?.trim().toLowerCase();
+      if (studentRoll) {
+        const studentUser = await userRepo
+          .createQueryBuilder('u')
+          .where('LOWER(TRIM(u.rollNumber)) = :roll', { roll: studentRoll })
+          .getOne();
+
+        if (studentUser && !notifiedUserIds.has(studentUser.id)) {
+          notifiedUserIds.add(studentUser.id);
+
+          const noticeTitle = `Academic Integrity Notice · ${exam.title}`;
+          const noticeMessage = `Following teacher review for exam "${exam.title}", unauthorized similarity/copying was confirmed in your paper. In accordance with academic integrity guidelines, zero marks (0) have been awarded for this assessment. Reason: ${notes}`;
+
+          const existingNotice = await this.notificationRepo.findOne({
+            where: {
+              user: { id: studentUser.id },
+              title: noticeTitle,
+            },
+          });
+
+          if (!existingNotice) {
+            const notification = this.notificationRepo.create({
+              user: studentUser,
+              title: noticeTitle,
+              message: noticeMessage,
+            });
+            await this.notificationRepo.save(notification);
+          } else {
+            // Update existing notification instead of creating a duplicate
+            existingNotice.message = noticeMessage;
+            existingNotice.readAt = null;
+            await this.notificationRepo.save(existingNotice);
+          }
+        }
+      }
+    }
+
+    return {
+      message: `Confirmed cheating and awarded 0 marks to ${targetResults.length} student(s).`,
+      penalizedStudents: targetResults.map((r) => r.answerSheet.registrationNo),
+    };
   }
 
   // ── publishResults ────────────────────────────────────────────────────────
@@ -870,9 +1072,6 @@ export class EvaluationService {
       });
       if (!exam) {
         throw new NotFoundException('Exam not found.');
-      }
-      if (exam.status === 'published' || exam.publishedAt) {
-        throw new BadRequestException('Results for this exam are already published.');
       }
       if (!exam.recheckDeadline || exam.recheckDeadline <= new Date()) {
         throw new BadRequestException(
@@ -901,9 +1100,13 @@ export class EvaluationService {
           result.status === 'awaiting_approval',
       );
       if (!completedResults.length) {
-        throw new BadRequestException(
-          'Mark at least one fully reviewed paper done before publishing.',
-        );
+        const hasAwaiting = results.some((result) => result.status === 'awaiting_approval');
+        if (hasAwaiting) {
+          throw new BadRequestException(
+            'Mark at least one fully reviewed paper done before publishing.',
+          );
+        }
+        throw new BadRequestException('Results for this exam are already published.');
       }
 
       for (const result of completedResults) {
@@ -948,12 +1151,18 @@ export class EvaluationService {
 
       const allResultsPublished =
         results.length === sheets.length &&
-        results.every((result) => result.status === 'approved');
+        results.every(
+          (result) =>
+            result.status === 'approved' ||
+            completedResults.some((cr) => cr.id === result.id),
+        );
       if (allResultsPublished) {
         exam.status = 'published';
         exam.publishedAt = publishedAt;
-        await examRepo.save(exam);
+      } else {
+        exam.status = 'under_review';
       }
+      await examRepo.save(exam);
 
       return {
         message: allResultsPublished
@@ -962,6 +1171,136 @@ export class EvaluationService {
         publishedCount: completedResults.length,
         examCompleted: allResultsPublished,
         publishedAt,
+      };
+    });
+  }
+
+  async addGraceMarks(examId: string, dto: AddGraceMarksDto, user: User) {
+    if (typeof dto.marks !== 'number' || !Number.isFinite(dto.marks) || dto.marks <= 0) {
+      throw new BadRequestException('Grace marks must be a positive number.');
+    }
+    const graceMarksToAdd = Math.round(dto.marks * 100) / 100;
+
+    return this.resultRepo.manager.transaction(async (manager) => {
+      const examRepo = manager.getRepository(Exam);
+      const exam = await examRepo.findOne({
+        where: { id: examId, createdBy: { id: user.id } },
+        relations: ['questions'],
+      });
+      if (!exam) {
+        throw new NotFoundException('Exam not found.');
+      }
+
+      const resultRepo = manager.getRepository(StudentResult);
+      const entryRepo = manager.getRepository(AnswerEntry);
+      const auditRepo = manager.getRepository(ReviewAudit);
+
+      let query = resultRepo
+        .createQueryBuilder('result')
+        .innerJoinAndSelect('result.answerSheet', 'answerSheet')
+        .innerJoinAndSelect('answerSheet.exam', 'exam')
+        .leftJoinAndSelect('result.entries', 'entries')
+        .where('exam.id = :examId', { examId });
+
+      if (dto.resultIds && dto.resultIds.length > 0) {
+        query = query.andWhere(
+          '(result.id IN (:...resultIds) OR answerSheet.id IN (:...resultIds))',
+          { resultIds: dto.resultIds },
+        );
+      }
+
+      const results = await query.getMany();
+      if (!results.length) {
+        throw new NotFoundException('No student results found to apply grace marks.');
+      }
+
+      let updatedCount = 0;
+      let excludedCheatingCount = 0;
+
+      for (const result of results) {
+        // STRICT ACADEMIC INTEGRITY EXCLUSION:
+        // Never add grace marks to a student who has been confirmed for cheating or penalized with zero
+        if (
+          result.cheatingStatus === 'confirmed_cheating' ||
+          (Boolean(result.cheatingPenaltyNotes) && result.totalApprovedMark === 0)
+        ) {
+          excludedCheatingCount++;
+          continue;
+        }
+
+        if (!result.entries || !result.entries.length) continue;
+
+        const currentTotal = result.entries.reduce(
+          (sum, e) => sum + (e.approvedMark ?? e.aiMark),
+          0,
+        );
+        const maxAwardable = Math.max(0, result.totalMaxMarks - currentTotal);
+        if (maxAwardable <= 0) continue;
+
+        let remainingGrace = Math.min(graceMarksToAdd, maxAwardable);
+
+        // Sort entries by headroom descending so marks are added where student lost most marks
+        const sortedEntries = [...result.entries].sort((a, b) => {
+          const headroomA = a.maxMarks - (a.approvedMark ?? a.aiMark);
+          const headroomB = b.maxMarks - (b.approvedMark ?? b.aiMark);
+          return headroomB - headroomA;
+        });
+
+        let anyEntryUpdated = false;
+        for (const entry of sortedEntries) {
+          if (remainingGrace <= 0.001) break;
+          const currentMark = entry.approvedMark ?? entry.aiMark;
+          const headroom = entry.maxMarks - currentMark;
+          if (headroom <= 0) continue;
+
+          const toAdd = Math.round(Math.min(headroom, remainingGrace) * 100) / 100;
+          if (toAdd <= 0) continue;
+
+          const newMark = Math.round((currentMark + toAdd) * 100) / 100;
+          entry.approvedMark = newMark;
+          entry.reviewStatus = 'overridden';
+          remainingGrace = Math.round((remainingGrace - toAdd) * 100) / 100;
+          anyEntryUpdated = true;
+
+          const audit = auditRepo.create({
+            answerEntry: entry,
+            reviewer: { id: user.id },
+            action: 'override',
+            originalAiMark: entry.aiMark,
+            finalMark: newMark,
+            comment: `Teacher awarded +${toAdd} grace mark(s)`,
+          });
+          await auditRepo.save(audit);
+          await entryRepo.save(entry);
+        }
+
+        if (anyEntryUpdated) {
+          result.totalApprovedMark = result.entries.reduce(
+            (sum, e) => sum + (e.approvedMark ?? e.aiMark),
+            0,
+          );
+          const allEntriesReviewed = result.entries.every(
+            (e) => e.reviewStatus !== 'pending' && e.approvedMark !== null && e.approvedMark !== undefined,
+          );
+          if (allEntriesReviewed) {
+            result.reviewCompletedAt = new Date();
+          }
+          await resultRepo.save(result);
+          updatedCount++;
+        }
+      }
+
+      const exclusionNotice = excludedCheatingCount > 0
+        ? ` (${excludedCheatingCount} student(s) excluded due to cheating violation)`
+        : '';
+
+      return {
+        success: true,
+        updatedCount,
+        excludedCheatingCount,
+        message: updatedCount > 0
+          ? `Successfully added ${graceMarksToAdd} grace mark(s) to ${updatedCount} student paper(s)${exclusionNotice}.`
+          : `No papers updated${exclusionNotice}. Students with confirmed cheating violations cannot receive grace marks.`,
       };
     });
   }

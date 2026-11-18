@@ -113,7 +113,11 @@ def evaluate_descriptive(
         combined = (semantic_score * SEMANTIC_WEIGHT) + (keyword_score * KEYWORD_WEIGHT)
 
     if not rubric:
-        ai_mark = round(combined * max_marks, 2)
+        base_mark = round(combined * max_marks, 2)
+        if student_answer and student_answer.strip() and max_marks > 0:
+            ai_mark = min(max_marks, round(base_mark + 0.5, 2))
+        else:
+            ai_mark = base_mark
 
     confidence = semantic_score if has_reference else keyword_score
     is_flagged = confidence < LOW_CONFIDENCE_THR
@@ -261,10 +265,17 @@ def _score_rubric(
             available_signals = [score for _, score in signals if score is not None]
             raw_coverage = sum(available_signals) / len(available_signals) if available_signals else 0.0
         coverage = max(0.0, min(1.0, (raw_coverage - threshold) / (1.0 - threshold)))
-        awarded_marks = round(concept_marks * coverage, 2)
-        if coverage >= 0.75:
+        base_marks = round(concept_marks * coverage, 2)
+        # Give 0.5 bonus marks per rubric concept when student provided an answer, capped at concept_marks
+        if student_answer and student_answer.strip() and concept_marks > 0:
+            awarded_marks = min(concept_marks, round(base_marks + 0.5, 2))
+        else:
+            awarded_marks = base_marks
+
+        effective_coverage = min(1.0, round(awarded_marks / concept_marks, 4)) if concept_marks > 0 else coverage
+        if effective_coverage >= 0.75:
             status = "addressed"
-        elif coverage > 0:
+        elif effective_coverage > 0:
             status = "partially addressed"
         else:
             status = "not addressed"
@@ -273,7 +284,7 @@ def _score_rubric(
             {
                 "conceptName": concept.get("name", ""),
                 "maxMarks": concept_marks,
-                "coverage": round(coverage, 4),
+                "coverage": effective_coverage,
                 "awardedMarks": awarded_marks,
                 "status": status,
                 "strictness": strictness,

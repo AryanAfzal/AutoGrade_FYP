@@ -141,6 +141,9 @@ export interface PublishedStudentResult {
   maxMarks: number;
   publishedAt: string | null;
   recheckDeadline: string | null;
+  cheatingStatus?: 'clean' | 'suspected' | 'confirmed_cheating';
+  cheatingPenaltyNotes?: string | null;
+  cheatingReport?: any | null;
   questions: {
     answerEntryId: string;
     recheckRequest: {
@@ -320,6 +323,9 @@ export interface StudentResult {
   totalApprovedMark: number | null;
   reviewCompletedAt: string | null;
   status: SheetStatus;
+  cheatingStatus?: 'clean' | 'suspected' | 'confirmed_cheating';
+  cheatingPenaltyNotes?: string | null;
+  cheatingReport?: any | null;
   ocrEngine?: OcrEngine;
   hasOmrImage?: boolean;
   entries: AnswerEntry[];
@@ -328,12 +334,49 @@ export interface StudentResult {
 // SIMILARITY
 export type SimilarityStatus = 'review' | 'suspected' | 'critical';
 
-// SIMILARITY
 export interface SimilarityStudent {
   name:          string;
   regNo:         string;
   answersheetId: string;
   answerText:    string;
+  resultId?:     string;
+  cheatingStatus?: string;
+  totalApprovedMark?: number | null;
+  totalMaxMarks?: number;
+}
+
+export interface MatchedSegment {
+  startA: number;
+  endA: number;
+  startB: number;
+  endB: number;
+  textA: string;
+  textB: string;
+  length: number;
+}
+
+export interface SimilarityQuestionComparison {
+  questionId: string;
+  questionNumber: number;
+  questionText: string;
+  similarityScore: number;
+  semanticScore?: number;
+  lexicalScore?: number;
+  verbatimRatio?: number;
+  riskLevel?: 'clean' | 'suspicious' | 'critical';
+  matchedSegments?: MatchedSegment[];
+  answerA: string;
+  answerB: string;
+}
+
+export interface GroupedSimilarityPair {
+  pairKey: string;
+  studentA: SimilarityStudent;
+  studentB: SimilarityStudent;
+  overallSimilarity: number;
+  matchedQuestionsCount: number;
+  riskLevel: 'clean' | 'suspicious' | 'critical';
+  questions: SimilarityQuestionComparison[];
 }
 
 export interface SimilarityFlag {
@@ -343,6 +386,11 @@ export interface SimilarityFlag {
   studentA:        SimilarityStudent;
   studentB:        SimilarityStudent;
   similarityScore: number;
+  semanticScore?:  number;
+  lexicalScore?:   number;
+  verbatimRatio?:  number;
+  riskLevel?:      'clean' | 'suspicious' | 'critical';
+  matchedSegments?: MatchedSegment[];
 }
 
 export interface SimilarityReport {
@@ -353,6 +401,7 @@ export interface SimilarityReport {
     byQuestion:        { questionId: string; questionText: string; flagCount: number }[];
   };
   flaggedPairs: SimilarityFlag[];
+  groupedPairs?: GroupedSimilarityPair[];
 }
 
 // ANALYTICS
