@@ -464,10 +464,18 @@ export class EvaluationService {
   }
 
   async getStudentNotifications(user: User) {
-    return this.notificationRepo.find({
+    const list = await this.notificationRepo.find({
       where: { user: { id: user.id } },
       order: { createdAt: 'DESC' },
       take: 30,
+    });
+    // Deduplicate identical notifications by title & message
+    const seen = new Set<string>();
+    return list.filter((n) => {
+      const key = `${n.title.trim()}__${n.message.trim()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
   }
 
@@ -965,6 +973,8 @@ export class EvaluationService {
       dto.teacherNotes?.trim() ||
       'Academic integrity violation: unauthorized copying confirmed by instructor.';
 
+    const notifiedUserIds = new Set<string>();
+
     for (const res of targetResults) {
       res.cheatingStatus = 'confirmed_cheating';
       res.cheatingPenaltyNotes = notes;
@@ -1000,7 +1010,7 @@ export class EvaluationService {
 
       await this.resultRepo.save(res);
 
-      // Create notification for student if their account exists
+      // Create notification for student if their account exists (prevent duplicates across multiple sheets or rolls)
       const studentRoll = res.answerSheet.registrationNo?.trim().toLowerCase();
       if (studentRoll) {
         const studentUser = await userRepo
@@ -1008,13 +1018,32 @@ export class EvaluationService {
           .where('LOWER(TRIM(u.rollNumber)) = :roll', { roll: studentRoll })
           .getOne();
 
-        if (studentUser) {
-          const notification = this.notificationRepo.create({
-            user: studentUser,
-            title: `Academic Integrity Notice · ${exam.title}`,
-            message: `Following teacher review for exam "${exam.title}", unauthorized similarity/copying was confirmed in your paper. In accordance with academic integrity guidelines, zero marks (0) have been awarded for this assessment. Reason: ${notes}`,
+        if (studentUser && !notifiedUserIds.has(studentUser.id)) {
+          notifiedUserIds.add(studentUser.id);
+
+          const noticeTitle = `Academic Integrity Notice · ${exam.title}`;
+          const noticeMessage = `Following teacher review for exam "${exam.title}", unauthorized similarity/copying was confirmed in your paper. In accordance with academic integrity guidelines, zero marks (0) have been awarded for this assessment. Reason: ${notes}`;
+
+          const existingNotice = await this.notificationRepo.findOne({
+            where: {
+              user: { id: studentUser.id },
+              title: noticeTitle,
+            },
           });
-          await this.notificationRepo.save(notification);
+
+          if (!existingNotice) {
+            const notification = this.notificationRepo.create({
+              user: studentUser,
+              title: noticeTitle,
+              message: noticeMessage,
+            });
+            await this.notificationRepo.save(notification);
+          } else {
+            // Update existing notification instead of creating a duplicate
+            existingNotice.message = noticeMessage;
+            existingNotice.readAt = null;
+            await this.notificationRepo.save(existingNotice);
+          }
         }
       }
     }

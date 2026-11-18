@@ -229,7 +229,16 @@ export default function StudentResultsPage() {
             Recent Updates & Recheck Notifications
           </h3>
           <div className="space-y-2">
-            {notifications.map((notification) => (
+            {notifications
+              .filter(
+                (n, idx, self) =>
+                  self.findIndex(
+                    (other) =>
+                      other.title?.trim() === n.title?.trim() &&
+                      other.message?.trim() === n.message?.trim(),
+                  ) === idx,
+              )
+              .map((notification) => (
               <Card key={notification.id} padding="sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
