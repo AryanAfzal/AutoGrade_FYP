@@ -1174,7 +1174,10 @@ export class EvaluationService {
         .where('exam.id = :examId', { examId });
 
       if (dto.resultIds && dto.resultIds.length > 0) {
-        query = query.andWhere('result.id IN (:...resultIds)', { resultIds: dto.resultIds });
+        query = query.andWhere(
+          '(result.id IN (:...resultIds) OR answerSheet.id IN (:...resultIds))',
+          { resultIds: dto.resultIds },
+        );
       }
 
       const results = await query.getMany();
@@ -1183,7 +1186,19 @@ export class EvaluationService {
       }
 
       let updatedCount = 0;
+      let excludedCheatingCount = 0;
+
       for (const result of results) {
+        // STRICT ACADEMIC INTEGRITY EXCLUSION:
+        // Never add grace marks to a student who has been confirmed for cheating or penalized with zero
+        if (
+          result.cheatingStatus === 'confirmed_cheating' ||
+          (Boolean(result.cheatingPenaltyNotes) && result.totalApprovedMark === 0)
+        ) {
+          excludedCheatingCount++;
+          continue;
+        }
+
         if (!result.entries || !result.entries.length) continue;
 
         const currentTotal = result.entries.reduce(
@@ -1246,10 +1261,17 @@ export class EvaluationService {
         }
       }
 
+      const exclusionNotice = excludedCheatingCount > 0
+        ? ` (${excludedCheatingCount} student(s) excluded due to cheating violation)`
+        : '';
+
       return {
         success: true,
         updatedCount,
-        message: `Successfully added ${graceMarksToAdd} grace mark(s) to ${updatedCount} student paper(s).`,
+        excludedCheatingCount,
+        message: updatedCount > 0
+          ? `Successfully added ${graceMarksToAdd} grace mark(s) to ${updatedCount} student paper(s)${exclusionNotice}.`
+          : `No papers updated${exclusionNotice}. Students with confirmed cheating violations cannot receive grace marks.`,
       };
     });
   }

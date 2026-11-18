@@ -354,6 +354,10 @@ function AIReviewContent() {
       setError('Please enter a valid positive number for grace marks.');
       return;
     }
+    if (graceTarget === 'selected' && selectedStudent?.cheatingStatus === 'confirmed_cheating') {
+      setError('Cannot award grace marks to a candidate with a confirmed academic integrity violation.');
+      return;
+    }
     setApplyingGrace(true);
     setError('');
     setNotice('');
@@ -1573,20 +1577,27 @@ function AIReviewContent() {
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-[#1A1A1A]">Apply to:</label>
                 <div className="flex flex-col gap-2">
-                  <label className="flex items-center gap-2 text-xs text-[#1A1A1A] cursor-pointer">
+                  <label className="flex items-start gap-2 text-xs text-[#1A1A1A] cursor-pointer">
                     <input
                       type="radio"
                       name="graceTarget"
                       checked={graceTarget === 'all'}
                       onChange={() => setGraceTarget('all')}
-                      className="accent-[#005461]"
+                      className="accent-[#005461] mt-0.5"
                     />
-                    <span>All student papers in this exam ({results.length})</span>
+                    <div>
+                      <span>All student papers in this exam ({results.length})</span>
+                      <span className="block text-[11px] text-amber-700">
+                        * Note: Students with confirmed cheating violations will be automatically excluded.
+                      </span>
+                    </div>
                   </label>
                   <label
                     className={cn(
-                      'flex items-center gap-2 text-xs cursor-pointer',
-                      selectedStudent ? 'text-[#1A1A1A]' : 'text-gray-400 cursor-not-allowed'
+                      'flex items-center gap-2 text-xs',
+                      selectedStudent && selectedStudent.cheatingStatus !== 'confirmed_cheating'
+                        ? 'text-[#1A1A1A] cursor-pointer'
+                        : 'text-gray-400 cursor-not-allowed'
                     )}
                   >
                     <input
@@ -1594,11 +1605,16 @@ function AIReviewContent() {
                       name="graceTarget"
                       checked={graceTarget === 'selected'}
                       onChange={() => setGraceTarget('selected')}
-                      disabled={!selectedStudent}
+                      disabled={!selectedStudent || selectedStudent.cheatingStatus === 'confirmed_cheating'}
                       className="accent-[#005461]"
                     />
                     <span>
-                      Selected student only {selectedStudent ? `(${selectedStudent.studentName})` : '(No student selected)'}
+                      Selected student only{' '}
+                      {selectedStudent
+                        ? selectedStudent.cheatingStatus === 'confirmed_cheating'
+                          ? `(${selectedStudent.studentName} — Cheating Violation Excluded)`
+                          : `(${selectedStudent.studentName})`
+                        : '(No student selected)'}
                     </span>
                   </label>
                 </div>
