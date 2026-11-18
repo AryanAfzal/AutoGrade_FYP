@@ -201,12 +201,13 @@ function AIReviewContent() {
       .then((similarityData) => {
         // Backend returns { examId, summary, flaggedPairs, groupedPairs }
         if (Array.isArray(similarityData)) {
-          setSimilarities(similarityData);
+          setSimilarities(similarityData.filter((s) => s.similarityScore > 0.85));
         } else if (similarityData && Array.isArray((similarityData as SimilarityReport).flaggedPairs)) {
           const rep = similarityData as SimilarityReport;
-          setSimilarities(rep.flaggedPairs);
+          const filteredFlags = (rep.flaggedPairs || []).filter((s) => s.similarityScore > 0.85);
+          setSimilarities(filteredFlags);
           if (rep.groupedPairs && Array.isArray(rep.groupedPairs)) {
-            setGroupedPairs(rep.groupedPairs);
+            setGroupedPairs(rep.groupedPairs.filter((p) => p.overallSimilarity > 0.85));
           }
         } else {
           setSimilarities([]);
@@ -533,12 +534,12 @@ function AIReviewContent() {
     };
   };
 
-  // Check if a student is involved in a high-similarity flag
+  // Check if a student is involved in a critical match (> 85%)
   const studentHasSimilarity = (studentName: string) =>
     similarities.some(
       (s) =>
         (s.studentA.name === studentName || s.studentB.name === studentName) &&
-        (s.similarityScore >= 0.70 || s.riskLevel === 'critical' || s.riskLevel === 'suspicious')
+        s.similarityScore > 0.85
     );
 
   const handleDecideSimilarity = async (
@@ -599,15 +600,15 @@ function AIReviewContent() {
       setResults(awaiting);
 
       if (Array.isArray(refreshedSimilarity)) {
-        setSimilarities(refreshedSimilarity);
+        setSimilarities(refreshedSimilarity.filter((s) => s.similarityScore > 0.85));
       } else if (
         refreshedSimilarity &&
         Array.isArray((refreshedSimilarity as SimilarityReport).flaggedPairs)
       ) {
         const rep = refreshedSimilarity as SimilarityReport;
-        setSimilarities(rep.flaggedPairs);
+        setSimilarities((rep.flaggedPairs || []).filter((s) => s.similarityScore > 0.85));
         if (rep.groupedPairs && Array.isArray(rep.groupedPairs)) {
-          setGroupedPairs(rep.groupedPairs);
+          setGroupedPairs(rep.groupedPairs.filter((p) => p.overallSimilarity > 0.85));
         }
       }
 
@@ -809,20 +810,19 @@ function AIReviewContent() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-amber-950">
-                    Dual-Layer Academic Integrity &amp; Plagiarism Detection
+                    Critical Plagiarism &amp; Cheating Detection (&gt;85% Match)
                   </h3>
                   <p className="mt-1 text-xs text-amber-900/90 leading-relaxed max-w-3xl">
-                    Our dual-layer engine matches both <strong>SBERT semantic meaning</strong> and <strong>multi-word verbatim n-grams (3-gram &amp; 4-gram)</strong> with typo propagation detection.
-                    Legitimate standard answers have high semantic similarity but low verbatim sequence overlap; copied papers have identical phrasing, matching example order, or shared OCR corruptions.
+                    Showing only submissions with a <strong>critical match rate greater than 85% (&gt;85%)</strong>. Lower matches are ignored to eliminate false positives on common standard concepts.
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-white text-amber-900 border border-amber-300">
-                  {groupedPairs.length} Flagged Pair{groupedPairs.length === 1 ? '' : 's'}
+                  {groupedPairs.length} Critical Pair{groupedPairs.length === 1 ? '' : 's'}
                 </span>
                 <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200">
-                  {groupedPairs.filter((p) => p.riskLevel === 'critical').length} Critical Risk
+                  Threshold: &gt;85% Match
                 </span>
               </div>
             </div>

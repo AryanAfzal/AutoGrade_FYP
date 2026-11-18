@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Tuple
 import numpy as np
 from models.sbert_loader import encode, pairwise_similarity_matrix
 
-SIMILARITY_THRESHOLD = 0.72  # Composite threshold for review flag
+SIMILARITY_THRESHOLD = 0.85  # Strict critical match threshold: > 85% only
 
 
 def normalize_tokens(text: str) -> List[str]:
@@ -183,8 +183,8 @@ def detect_similarity(
                 
                 analysis = evaluate_pair_similarity(text_a, text_b, sem_score)
                 
-                # Flag if riskLevel is critical or suspicious, or composite score exceeds threshold
-                if analysis["riskLevel"] in ("critical", "suspicious") or analysis["compositeScore"] >= threshold:
+                # Show only critical matches greater than 85% (> 0.85); ignore the rest
+                if analysis["compositeScore"] > threshold:
                     flagged.append({
                         "questionId":      q_id,
                         "questionText":    q_text,
@@ -256,16 +256,17 @@ def group_flagged_into_pairs(flagged_items: list[dict]) -> list[dict]:
     grouped = []
     for pair_key, data in pair_map.items():
         avg_score = round(sum(data["scores"]) / len(data["scores"]), 4)
-        has_critical = "critical" in data["riskLevels"]
-        grouped.append({
-            "pairKey":               pair_key,
-            "studentA":              data["studentA"],
-            "studentB":              data["studentB"],
-            "overallSimilarity":     avg_score,
-            "matchedQuestionsCount": len(data["questions"]),
-            "riskLevel":             "critical" if has_critical or avg_score >= 0.80 else "suspicious",
-            "questions":             data["questions"],
-        })
+        # Show only critical match percent greater than 85% (> 0.85); ignore the rest
+        if avg_score > 0.85:
+            grouped.append({
+                "pairKey":               pair_key,
+                "studentA":              data["studentA"],
+                "studentB":              data["studentB"],
+                "overallSimilarity":     avg_score,
+                "matchedQuestionsCount": len(data["questions"]),
+                "riskLevel":             "critical",
+                "questions":             data["questions"],
+            })
 
     grouped.sort(key=lambda x: (x["riskLevel"] == "critical", x["overallSimilarity"]), reverse=True)
     return grouped

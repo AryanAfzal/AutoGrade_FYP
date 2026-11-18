@@ -863,36 +863,43 @@ export class EvaluationService {
       {
         questions:      exam.questions,
         studentAnswers: studentAnswers,
-        threshold:      0.72,
+        threshold:      0.85, // Critical match threshold: only > 85%
       },
     );
 
     const data = response.data;
     const resultMap = new Map(results.map((r) => [r.answerSheet.registrationNo, r]));
 
-    // Attach studentResult IDs and cheating status to grouped pairs
+    // Filter to only include critical matches with percent greater than 85% (> 0.85)
+    if (data.flaggedPairs && Array.isArray(data.flaggedPairs)) {
+      data.flaggedPairs = data.flaggedPairs.filter((p: any) => p.similarityScore > 0.85);
+    }
+
+    // Attach studentResult IDs and cheating status to grouped pairs (only > 85%)
     if (data.groupedPairs && Array.isArray(data.groupedPairs)) {
-      data.groupedPairs = data.groupedPairs.map((pair: any) => {
-        const resA = resultMap.get(pair.studentA?.regNo);
-        const resB = resultMap.get(pair.studentB?.regNo);
-        return {
-          ...pair,
-          studentA: {
-            ...pair.studentA,
-            resultId: resA?.id,
-            cheatingStatus: resA?.cheatingStatus || 'clean',
-            totalApprovedMark: resA?.totalApprovedMark,
-            totalMaxMarks: resA?.totalMaxMarks,
-          },
-          studentB: {
-            ...pair.studentB,
-            resultId: resB?.id,
-            cheatingStatus: resB?.cheatingStatus || 'clean',
-            totalApprovedMark: resB?.totalApprovedMark,
-            totalMaxMarks: resB?.totalMaxMarks,
-          },
-        };
-      });
+      data.groupedPairs = data.groupedPairs
+        .filter((pair: any) => pair.overallSimilarity > 0.85)
+        .map((pair: any) => {
+          const resA = resultMap.get(pair.studentA?.regNo);
+          const resB = resultMap.get(pair.studentB?.regNo);
+          return {
+            ...pair,
+            studentA: {
+              ...pair.studentA,
+              resultId: resA?.id,
+              cheatingStatus: resA?.cheatingStatus || 'clean',
+              totalApprovedMark: resA?.totalApprovedMark,
+              totalMaxMarks: resA?.totalMaxMarks,
+            },
+            studentB: {
+              ...pair.studentB,
+              resultId: resB?.id,
+              cheatingStatus: resB?.cheatingStatus || 'clean',
+              totalApprovedMark: resB?.totalApprovedMark,
+              totalMaxMarks: resB?.totalMaxMarks,
+            },
+          };
+        });
     }
 
     return data;

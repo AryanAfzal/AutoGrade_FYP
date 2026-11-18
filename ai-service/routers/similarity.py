@@ -28,7 +28,7 @@ class StudentAnswerSet(BaseModel):
 class SimilarityRequest(BaseModel):
     questions:      list[QuestionInfo]
     studentAnswers: list[StudentAnswerSet]
-    threshold:      Optional[float] = 0.72
+    threshold:      Optional[float] = 0.85
 
 
 @router.post("/similarity/{exam_id}")
@@ -55,7 +55,7 @@ async def get_similarity(exam_id: str, body: SimilarityRequest):
     flagged = detect_similarity(
         exam_questions=questions_list,
         all_student_answers=students_list,
-        threshold=body.threshold if body.threshold is not None else 0.72,
+        threshold=body.threshold if body.threshold is not None else 0.85,
     )
     summary = summarise_flags(flagged)
     grouped = group_flagged_into_pairs(flagged)
