@@ -109,6 +109,8 @@ function AIReviewContent() {
   const router = useRouter();
   const examId = searchParams.get('examId');
 
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [loadingExams, setLoadingExams] = useState(true);
   const [exam, setExam] = useState<Exam | null>(null);
   const [results, setResults] = useState<StudentResult[]>([]);
   const [similarities, setSimilarities] = useState<SimilarityFlag[]>([]);
@@ -159,6 +161,28 @@ function AIReviewContent() {
     }
   }, [router]);
 
+  // Load all exams for the dropdown selector
+  useEffect(() => {
+    setLoadingExams(true);
+    examApi
+      .getAll()
+      .then((data) => {
+        setExams(data);
+        if (!examId && data.length > 0) {
+          router.replace(`/dashboard/ai-review?examId=${data[0].id}`);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to load exams', err);
+      })
+      .finally(() => setLoadingExams(false));
+  }, [examId, router]);
+
+  const handleExamChange = (newExamId: string) => {
+    if (!newExamId || newExamId === examId) return;
+    router.push(`/dashboard/ai-review?examId=${newExamId}`);
+  };
+
   useEffect(() => {
     if (!examId) return;
 
@@ -182,10 +206,16 @@ function AIReviewContent() {
           defaultFuture.setMinutes(defaultFuture.getMinutes() - defaultFuture.getTimezoneOffset());
           setRecheckDeadline(defaultFuture.toISOString().slice(0, 16));
         }
-        const awaiting = resultsData.filter((r) => r.status === 'awaiting_approval');
-        setResults(awaiting);
-        if (awaiting.length > 0) {
-          setSelectedStudentId((prev) => prev ?? awaiting[0].answersheetId);
+        // Include all evaluated student results (both in-review and published)
+        setResults(resultsData);
+        if (resultsData.length > 0) {
+          setSelectedStudentId((prev) =>
+            prev && resultsData.some((r) => r.answersheetId === prev)
+              ? prev
+              : resultsData[0].answersheetId,
+          );
+        } else {
+          setSelectedStudentId(null);
         }
       })
       .catch((loadError: unknown) =>
@@ -251,7 +281,7 @@ function AIReviewContent() {
     try {
       await evaluationApi.reviewAnswerEntry(examId!, entry.id, payload);
       const refreshedResults = await evaluationApi.getResults(examId!);
-      setResults(refreshedResults.filter((result) => result.status === 'awaiting_approval'));
+      setResults(refreshedResults);
       setNotice(
         action === 'approve'
           ? 'AI mark approved and recorded.'
@@ -306,8 +336,10 @@ function AIReviewContent() {
     try {
       const result = await evaluationApi.publishResults(examId);
       const refreshedResults = await evaluationApi.getResults(examId);
-      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
-      setSelectedStudentId(null);
+      setResults(refreshedResults);
+      if (refreshedResults.length > 0 && (!selectedStudentId || !refreshedResults.some((r) => r.answersheetId === selectedStudentId))) {
+        setSelectedStudentId(refreshedResults[0].answersheetId);
+      }
       if (result.examCompleted) {
         setExam((current) =>
           current
@@ -371,7 +403,7 @@ function AIReviewContent() {
         resultIds,
       });
       const refreshedResults = await evaluationApi.getResults(examId);
-      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
+      setResults(refreshedResults);
       setNotice(res.message);
       setShowGraceModal(false);
     } catch (err: unknown) {
@@ -413,7 +445,7 @@ function AIReviewContent() {
     try {
       await evaluationApi.completeResultReview(examId, result.id);
       const refreshedResults = await evaluationApi.getResults(examId);
-      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
+      setResults(refreshedResults);
       setNotice(`${result.studentName}'s paper is marked done and ready to publish.`);
     } catch (completeError: unknown) {
       setError(
@@ -483,7 +515,7 @@ function AIReviewContent() {
         await evaluationApi.reviewAnswerEntry(examId, entry.id, { action: 'approve' });
       }
       const refreshedResults = await evaluationApi.getResults(examId);
-      setResults(refreshedResults.filter((item) => item.status === 'awaiting_approval'));
+      setResults(refreshedResults);
       setNotice(
         `Approved ${pendingEntries.length} question mark${pendingEntries.length === 1 ? '' : 's'} for ${student.studentName}.`,
       );
@@ -498,7 +530,9 @@ function AIReviewContent() {
     }
   };
 
-  const doneCount = results.filter((result) => !!result.reviewCompletedAt).length;
+  const pendingCount = results.filter((r) => r.status === 'awaiting_approval').length;
+  const publishedCount = results.filter((r) => r.status === 'approved').length;
+  const doneCount = results.filter((result) => result.status === 'awaiting_approval' && !!result.reviewCompletedAt).length;
   const hasDonePapers = doneCount > 0;
   const isDeadlineSet = !!exam?.recheckDeadline;
   const isDeadlineExpired = !!exam?.recheckDeadline && new Date(exam.recheckDeadline).getTime() <= Date.now();
@@ -600,8 +634,7 @@ function AIReviewContent() {
         evaluationApi.getSimilarityFlags(examId),
       ]);
 
-      const awaiting = refreshedResults.filter((r) => r.status === 'awaiting_approval');
-      setResults(awaiting);
+      setResults(refreshedResults);
 
       if (Array.isArray(refreshedSimilarity)) {
         setSimilarities(refreshedSimilarity.filter((s) => s.similarityScore > 0.85));
@@ -640,13 +673,32 @@ function AIReviewContent() {
     return true;
   });
 
-  if (!examId) {
+  if (loadingExams) {
+    return (
+      <div className="space-y-6 max-w-6xl">
+        <Card>
+          <div className="flex items-center justify-center py-16 gap-3">
+            <Loader size={20} className="text-[#005461] animate-spin" />
+            <p className="text-sm text-[#888888]">Loading exams and AI review...</p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!examId && exams.length === 0) {
     return (
       <div className="space-y-6 max-w-4xl">
         <Card>
-          <div className="flex items-center justify-center py-12 gap-3">
-            <AlertCircle size={20} className="text-[#FAB963]" />
-            <p className="text-sm text-[#888888]">Please select an exam from the dashboard</p>
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+            <AlertCircle size={36} className="text-[#FAB963]" />
+            <h3 className="text-base font-semibold text-[#1A1A1A]">No Exams Found</h3>
+            <p className="text-xs text-[#888888] max-w-md">
+              You haven&apos;t created any exams yet. Create an exam and upload student sheets to start AI evaluation.
+            </p>
+            <Button variant="primary" onClick={() => router.push('/dashboard/create-exam')}>
+              Create Exam
+            </Button>
           </div>
         </Card>
       </div>
@@ -655,13 +707,50 @@ function AIReviewContent() {
 
   return (
     <div className="space-y-6 max-w-6xl">
+      {/* Exam Dropdown Selector Bar */}
+      <div className="rounded-2xl border border-[#E8DCC8] bg-white p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 shrink-0 rounded-xl bg-[#005461]/10 flex items-center justify-center text-[#005461]">
+            <FileText size={20} />
+          </div>
+          <div>
+            <label htmlFor="exam-selector" className="block text-xs font-semibold text-[#888888] uppercase tracking-wider">
+              Select Exam for AI Review
+            </label>
+            <p className="text-xs text-[#555555]">
+              Switch between exams to view evaluated papers, questions, similarity checks, and published scores
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 min-w-[280px] md:w-96">
+          <select
+            id="exam-selector"
+            value={examId || ''}
+            onChange={(e) => handleExamChange(e.target.value)}
+            disabled={loadingExams || exams.length === 0}
+            className="w-full h-11 px-3.5 py-2 text-sm font-medium bg-[#FAF8F5] border border-[#E8DCC8] rounded-xl text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#005461] focus:border-transparent transition-all cursor-pointer shadow-sm"
+          >
+            {exams.length === 0 ? (
+              <option value="">No exams available</option>
+            ) : (
+              exams.map((ex) => (
+                <option key={ex.id} value={ex.id}>
+                  {ex.title} ({ex.course} · {ex.term}) {ex.status === 'published' ? '✓ Published' : '• In Review'}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+      </div>
+
       {/* Header */}
       <div>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold text-[#1A1A1A]">Teacher Review</h2>
             <p className="text-sm text-[#888888] mt-1">
-              Approve or override each question before publishing · {results.length} submission(s) pending
+              Approve or override each question before publishing ·{' '}
+              <span className="font-semibold text-[#005461]">{results.length}</span> submission(s) ({publishedCount} published, {pendingCount} awaiting approval)
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -674,15 +763,32 @@ function AIReviewContent() {
               Add Grace Marks
             </Button>
             <div className="flex flex-col items-end gap-1">
-              <Button
-                variant="primary"
-                onClick={handlePublish}
-                loading={publishing}
-                disabled={!hasDonePapers || publishing}
-              >
-                <CheckCircle2 size={14} className="mr-2" />
-                Publish done papers ({doneCount})
-              </Button>
+              {doneCount > 0 ? (
+                <Button
+                  variant="primary"
+                  onClick={handlePublish}
+                  loading={publishing}
+                  disabled={publishing}
+                >
+                  <CheckCircle2 size={14} className="mr-2" />
+                  Publish done papers ({doneCount})
+                </Button>
+              ) : publishedCount > 0 && pendingCount === 0 ? (
+                <div className="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-semibold gap-2">
+                  <CheckCircle2 size={16} className="text-emerald-600" />
+                  All Papers Published ({publishedCount})
+                </div>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={handlePublish}
+                  loading={publishing}
+                  disabled={true}
+                >
+                  <CheckCircle2 size={14} className="mr-2" />
+                  Publish done papers (0)
+                </Button>
+              )}
               {hasDonePapers && !isDeadlineValid && (
                 <span className="text-[11px] text-amber-700 font-medium">
                   {isDeadlineExpired ? '⚠️ Deadline expired (will extend & publish)' : '⚠️ Deadline needed (will set & publish)'}
@@ -952,11 +1058,26 @@ function AIReviewContent() {
         <Card>
           <div className="flex flex-col items-center justify-center py-16 gap-3">
             <CheckCircle2 size={32} className="text-green-500" />
-            <p className="text-sm font-medium text-[#1A1A1A]">All clear!</p>
-            <p className="text-xs text-[#888888]">
-              {filter === 'all' && (results.length > 0 ? 'All questions have been reviewed. Publish when ready.' : 'No results pending review')}
-              {filter === 'flagged' && 'No flagged answers found'}
+            <p className="text-sm font-medium text-[#1A1A1A]">
+              {results.length === 0 ? 'No answer sheets evaluated yet' : 'All clear!'}
             </p>
+            <p className="text-xs text-[#888888] text-center max-w-sm">
+              {results.length === 0
+                ? 'No answer sheets have been uploaded or evaluated for this exam yet.'
+                : filter === 'flagged'
+                ? 'No flagged answers found for this exam.'
+                : 'No high-similarity answers found.'}
+            </p>
+            {results.length === 0 && exam && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-2"
+                onClick={() => router.push(`/dashboard/upload-sheets?examId=${exam.id}`)}
+              >
+                Upload Sheets for this Exam
+              </Button>
+            )}
           </div>
         </Card>
       ) : (
@@ -966,6 +1087,7 @@ function AIReviewContent() {
             {filteredResults.map((result) => {
               const flaggedCount = result.entries.filter((e) => e.isFlagged).length;
               const hasSimilarity = studentHasSimilarity(result.studentName);
+              const isCheating = result.cheatingStatus === 'confirmed_cheating';
 
               return (
                 <button
@@ -1016,32 +1138,47 @@ function AIReviewContent() {
                           </>
                         );
                       })()}
-                      {result.reviewCompletedAt && (
-                        <Badge variant="success">Done · ready to publish</Badge>
-                      )}
 
-                      {(flaggedCount > 0 || hasSimilarity || result.ocrEngine === 'omr') && (
-                        <div className="flex gap-2 flex-wrap">
-                          {result.ocrEngine === 'omr' && (
-                            <Badge variant="info" className="text-xs">
-                              <ScanLine size={10} className="mr-1" />
-                              OMR MCQ
-                            </Badge>
-                          )}
-                          {flaggedCount > 0 && (
-                            <Badge variant="danger" className="text-xs">
-                              <Flag size={10} className="mr-1" />
-                              {flaggedCount} flagged
-                            </Badge>
-                          )}
-                          {hasSimilarity && (
-                            <Badge variant="warning" className="text-xs">
-                              <TrendingDown size={10} className="mr-1" />
-                              High match
-                            </Badge>
-                          )}
-                        </div>
-                      )}
+                      <div className="flex gap-1.5 flex-wrap items-center">
+                        {isCheating ? (
+                          <Badge variant="danger" className="text-xs">
+                            <ShieldAlert size={10} className="mr-1" />
+                            Cheating (0 Marks)
+                          </Badge>
+                        ) : result.status === 'approved' ? (
+                          <Badge variant="success" className="bg-emerald-50 text-emerald-800 border-emerald-300 text-xs">
+                            <CheckCircle2 size={10} className="mr-1" />
+                            Published
+                          </Badge>
+                        ) : result.reviewCompletedAt ? (
+                          <Badge variant="success" className="text-xs">
+                            Done · ready to publish
+                          </Badge>
+                        ) : (
+                          <Badge variant="default" className="text-xs text-gray-600 bg-gray-100 border-gray-200">
+                            Awaiting Review
+                          </Badge>
+                        )}
+
+                        {result.ocrEngine === 'omr' && (
+                          <Badge variant="info" className="text-xs">
+                            <ScanLine size={10} className="mr-1" />
+                            OMR MCQ
+                          </Badge>
+                        )}
+                        {flaggedCount > 0 && (
+                          <Badge variant="danger" className="text-xs">
+                            <Flag size={10} className="mr-1" />
+                            {flaggedCount} flagged
+                          </Badge>
+                        )}
+                        {hasSimilarity && (
+                          <Badge variant="warning" className="text-xs">
+                            <TrendingDown size={10} className="mr-1" />
+                            High match
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </Card>
                 </button>
@@ -1061,7 +1198,15 @@ function AIReviewContent() {
                         Roll no. on paper: {selectedStudent.registrationNo || 'Not detected'}
                       </p>
                     </div>
-                    {selectedStudent.reviewCompletedAt ? (
+                    {selectedStudent.cheatingStatus === 'confirmed_cheating' ? (
+                      <Badge variant="danger">
+                        <ShieldAlert size={12} className="mr-1" /> Cheating Violation (0 Marks)
+                      </Badge>
+                    ) : selectedStudent.status === 'approved' ? (
+                      <Badge variant="success" className="bg-emerald-100 text-emerald-800 border-emerald-300">
+                        <CheckCircle2 size={12} className="mr-1" /> Published Paper
+                      </Badge>
+                    ) : selectedStudent.reviewCompletedAt ? (
                       <Badge variant="success">Done · ready to publish</Badge>
                     ) : (
                       <div className="flex flex-wrap items-center gap-2">
@@ -1101,6 +1246,19 @@ function AIReviewContent() {
                       </div>
                     )}
                   </div>
+
+                  {selectedStudent.cheatingStatus === 'confirmed_cheating' && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-900 flex items-start gap-2.5">
+                      <ShieldAlert size={16} className="text-red-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-red-950">Academic Integrity Violation Confirmed</p>
+                        <p className="mt-0.5 text-red-800">
+                          This student has been awarded 0 marks for copying/cheating.
+                          {selectedStudent.cheatingPenaltyNotes && ` Reason: "${selectedStudent.cheatingPenaltyNotes}"`}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-3 gap-3 pt-4 border-t border-[#E8DCC8]">
                     {(() => {

@@ -801,8 +801,11 @@ export class EvaluationService {
       ) {
         throw new NotFoundException('Answer entry not found for this exam.');
       }
-      if (entry.result.status !== 'awaiting_approval') {
-        throw new BadRequestException('Only unpublished results can be reviewed.');
+      if (
+        entry.result.status !== 'awaiting_approval' &&
+        entry.result.status !== 'approved'
+      ) {
+        throw new BadRequestException('Invalid result status for review.');
       }
 
       let finalMark = entry.aiMark;
@@ -888,8 +891,11 @@ export class EvaluationService {
       if (!result) {
         throw new NotFoundException('Review result not found for this exam.');
       }
-      if (result.status !== 'awaiting_approval') {
-        throw new BadRequestException('Only unpublished results can be marked done.');
+      if (
+        result.status !== 'awaiting_approval' &&
+        result.status !== 'approved'
+      ) {
+        throw new BadRequestException('Invalid result status for completion.');
       }
 
       const expectedQuestionIds = new Set(
