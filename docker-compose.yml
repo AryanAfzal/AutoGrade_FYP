@@ -1,0 +1,160 @@
+name: autograde
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: autograde
+      POSTGRES_PASSWORD: autograde-local-dev
+      POSTGRES_DB: autograde
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autograde -d autograde"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  uploads-init:
+    image: busybox:1.36
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /uploads && chown -R 1000:1000 /uploads"]
+    volumes:
+      - uploads-data:/uploads
+    restart: "no"
+
+  ollama:
+    image: ollama/ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama-model:
+    image: ollama/ollama
+    entrypoint: ["ollama"]
+    command: ["pull", "${OLLAMA_MODEL:-qwen2.5:1.5b}"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./ai-service/.env
+        required: false
+    environment:
+      AI_SERVICE_PORT: "8000"
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:1.5b}
+      OCR_ENABLE_OLLAMA: "true"
+      OMP_NUM_THREADS: ${AI_CPU_THREADS:-4}
+      MKL_NUM_THREADS: ${AI_CPU_THREADS:-4}
+    volumes:
+      - uploads-data:/app/backend/uploads
+      - paddleocr-data:/root/.paddleocr
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      uploads-init:
+        condition: service_completed_successfully
+      ollama-model:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 180s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      PORT: "3001"
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: autograde
+      DATABASE_PASS: autograde-local-dev
+      DATABASE_NAME: autograde
+      FRONTEND_URL: http://localhost:3000
+      AI_SERVICE_URL: http://ai-service:8000
+    volumes:
+      - uploads-data:/app/backend/uploads
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      uploads-init:
+        condition: service_completed_successfully
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  uploads-data:
+  paddleocr-data:
+  ollama-data:
