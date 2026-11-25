@@ -49,7 +49,6 @@ import transformers.utils.import_utils as _transformers_import_utils
 _transformers_import_utils.is_sklearn_available = lambda: False
 _transformers_import_utils._sklearn_available = False
 
-from sentence_transformers import SentenceTransformer
 import numpy as np
 from numpy.linalg import norm
 
@@ -68,18 +67,36 @@ LOCAL_MODEL_DIR = (
     BACKEND_MODELS_DIR if BACKEND_MODELS_DIR.exists() else FALLBACK_MODEL_DIR
 )
 
-if LOCAL_MODEL_DIR.exists():
-    print(f"[sbert_loader] Loading local model: {LOCAL_MODEL_DIR}")
-    _model = SentenceTransformer(str(LOCAL_MODEL_DIR), local_files_only=True)
-else:
-    raise FileNotFoundError(
-        f"[sbert_loader] Local SBERT model not found at {BACKEND_MODELS_DIR} or {FALLBACK_MODEL_DIR}"
-    )
-print("[sbert_loader] Model ready.")
+_model = None
+
+
+def get_sbert():
+    """Lazy-load SBERT model on demand to keep startup memory under 50MB."""
+    global _model
+    if _model is not None:
+        return _model
+
+    from sentence_transformers import SentenceTransformer
+
+    if BACKEND_MODELS_DIR.exists():
+        print(f"[sbert_loader] Loading local backend model: {BACKEND_MODELS_DIR}")
+        _model = SentenceTransformer(str(BACKEND_MODELS_DIR), local_files_only=True)
+    elif FALLBACK_MODEL_DIR.exists():
+        print(f"[sbert_loader] Loading local fallback model: {FALLBACK_MODEL_DIR}")
+        _model = SentenceTransformer(str(FALLBACK_MODEL_DIR), local_files_only=True)
+    elif LOCAL_MODEL_DIR.exists():
+        print(f"[sbert_loader] Loading local model: {LOCAL_MODEL_DIR}")
+        _model = SentenceTransformer(str(LOCAL_MODEL_DIR), local_files_only=True)
+    else:
+        print("[sbert_loader] Local model not found; loading from HuggingFace...")
+        _model = SentenceTransformer(f"sentence-transformers/{MODEL_NAME}")
+
+    print("[sbert_loader] Model ready.")
+    return _model
 
 
 def encode(texts: list[str]) -> np.ndarray:
-    embeddings = _model.encode(
+    embeddings = get_sbert().encode(
         texts,
         convert_to_numpy=True,
         normalize_embeddings=True,   # L2-normalise → dot product = cosine sim
@@ -96,4 +113,11 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 def pairwise_similarity_matrix(embeddings: np.ndarray) -> np.ndarray:
     return embeddings @ embeddings.T
 
-sbert = _model
+
+class _SbertProxy:
+    """Proxy object so legacy imports of `sbert` resolve lazily."""
+    def __getattr__(self, name: str):
+        return getattr(get_sbert(), name)
+
+
+sbert = _SbertProxy()
