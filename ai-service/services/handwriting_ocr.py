@@ -72,63 +72,79 @@ from services.text_cleaner import (
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 USE_GPU_PADDLE = torch.cuda.is_available()
 
-# Initialize PaddleOCR with sensitive detection parameters for handwriting
-try:
-    ocr_engine = PaddleOCR(
-        use_angle_cls=True,
-        lang="en",
-        use_gpu=USE_GPU_PADDLE,
-        show_log=False,
-        det_limit_side_len=3000,
-        det_db_thresh=0.10,       # Sensitive threshold to capture light/thin handwriting
-        det_db_box_thresh=0.20,   # Keep faint handwritten boxes
-        det_db_unclip_ratio=2.0,  # Adequate margins for full character ascenders/descenders
-    )
-except Exception as e:
-    print(f"PaddleOCR init fallback (retry without use_gpu): {e}")
-    ocr_engine = PaddleOCR(
-        use_angle_cls=True,
-        lang="en",
-        show_log=False,
-        det_limit_side_len=3000,
-        det_db_thresh=0.10,
-        det_db_box_thresh=0.20,
-        det_db_unclip_ratio=2.0,
-    )
+# Lazy-loaded singletons to prevent startup Out-Of-Memory on 512MB free tier
+_ocr_engine = None
+_trocr_bundle = None
 
-# Initialize TrOCR from local models folder
-BACKEND_TROCR_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "backend"
-    / "src"
-    / "Models"
-    / "trocr-base-handwritten"
-)
-FALLBACK_TROCR_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "model_files"
-    / "trocr-base-handwritten"
-)
-LOCAL_MODEL_DIR = (
-    BACKEND_TROCR_DIR if BACKEND_TROCR_DIR.exists() else FALLBACK_TROCR_DIR
-)
-if not LOCAL_MODEL_DIR.exists():
-    raise FileNotFoundError(
-        f"Local TrOCR model not found at {BACKEND_TROCR_DIR} or {FALLBACK_TROCR_DIR}"
-    )
-MODEL_SRC = str(LOCAL_MODEL_DIR)
 
-print(f"Loading official Base TrOCR from local folder '{MODEL_SRC}'...")
-image_processor = ViTImageProcessor.from_pretrained(
-    MODEL_SRC, local_files_only=True
-)
-tokenizer = RobertaTokenizer.from_pretrained(MODEL_SRC, local_files_only=True)
-model = VisionEncoderDecoderModel.from_pretrained(
-    MODEL_SRC, local_files_only=True
-)
-model.to(DEVICE)
-model.eval()
-print(f"TrOCR model loaded successfully on device: {DEVICE.upper()}")
+def get_ocr_engine():
+    global _ocr_engine
+    if _ocr_engine is None:
+        try:
+            _ocr_engine = PaddleOCR(
+                use_angle_cls=True,
+                lang="en",
+                use_gpu=USE_GPU_PADDLE,
+                show_log=False,
+                det_limit_side_len=3000,
+                det_db_thresh=0.10,       # Sensitive threshold to capture light/thin handwriting
+                det_db_box_thresh=0.20,   # Keep faint handwritten boxes
+                det_db_unclip_ratio=2.0,  # Adequate margins for full character ascenders/descenders
+            )
+        except Exception as e:
+            print(f"PaddleOCR init fallback (retry without use_gpu): {e}")
+            _ocr_engine = PaddleOCR(
+                use_angle_cls=True,
+                lang="en",
+                show_log=False,
+                det_limit_side_len=3000,
+                det_db_thresh=0.10,
+                det_db_box_thresh=0.20,
+                det_db_unclip_ratio=2.0,
+            )
+    return _ocr_engine
+
+
+def get_trocr():
+    global _trocr_bundle
+    if _trocr_bundle is not None:
+        return _trocr_bundle
+
+    BACKEND_TROCR_DIR = (
+        Path(__file__).resolve().parent.parent.parent
+        / "backend"
+        / "src"
+        / "Models"
+        / "trocr-base-handwritten"
+    )
+    FALLBACK_TROCR_DIR = (
+        Path(__file__).resolve().parent.parent
+        / "model_files"
+        / "trocr-base-handwritten"
+    )
+    LOCAL_MODEL_DIR = (
+        BACKEND_TROCR_DIR if BACKEND_TROCR_DIR.exists() else FALLBACK_TROCR_DIR
+    )
+    if not LOCAL_MODEL_DIR.exists():
+        raise FileNotFoundError(
+            f"Local TrOCR model not found at {BACKEND_TROCR_DIR} or {FALLBACK_TROCR_DIR}"
+        )
+    MODEL_SRC = str(LOCAL_MODEL_DIR)
+
+    print(f"Loading official Base TrOCR on-demand from local folder '{MODEL_SRC}'...")
+    image_processor = ViTImageProcessor.from_pretrained(
+        MODEL_SRC, local_files_only=True
+    )
+    tokenizer = RobertaTokenizer.from_pretrained(MODEL_SRC, local_files_only=True)
+    model = VisionEncoderDecoderModel.from_pretrained(
+        MODEL_SRC, local_files_only=True
+    )
+    model.to(DEVICE)
+    model.eval()
+    print(f"TrOCR model loaded successfully on device: {DEVICE.upper()}")
+
+    _trocr_bundle = (image_processor, tokenizer, model)
+    return _trocr_bundle
 
 
 def extract_text_from_image(image_path: str) -> list[dict]:
@@ -146,6 +162,7 @@ def extract_text_from_image(image_path: str) -> list[dict]:
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     detection_started = time.perf_counter()
+    ocr_engine = get_ocr_engine()
     result = ocr_engine.ocr(image_path, cls=True)
     detection_seconds = time.perf_counter() - detection_started
     if not result or result[0] is None:
@@ -202,6 +219,7 @@ def extract_text_from_image(image_path: str) -> list[dict]:
             b_crops = crops_to_infer[b_start : b_start + batch_size]
             b_indices = crop_indices[b_start : b_start + batch_size]
             try:
+                image_processor, tokenizer, model = get_trocr()
                 pixel_values = image_processor(
                     images=b_crops, return_tensors="pt"
                 ).pixel_values.to(DEVICE)
