@@ -50,7 +50,7 @@ app.include_router(similarity_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "ai-service"}
+    return {"status": "ok", "service": "ai-service", "version": "v2.1-pen-to-print"}
 
 if __name__ == "__main__":
     import uvicorn
