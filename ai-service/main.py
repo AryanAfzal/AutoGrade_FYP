@@ -1,4 +1,10 @@
 import os
+import transformers.utils.import_utils as _transformers_import_utils
+_transformers_import_utils.is_torchvision_available = lambda: False
+_transformers_import_utils._torchvision_available = False
+_transformers_import_utils.is_sklearn_available = lambda: False
+_transformers_import_utils._sklearn_available = False
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

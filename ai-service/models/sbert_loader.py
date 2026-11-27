@@ -46,6 +46,8 @@ if not any(type(f).__name__ == "_SklearnMetaFinder" for f in sys.meta_path):
     sys.meta_path.insert(0, _SklearnMetaFinder())
 
 import transformers.utils.import_utils as _transformers_import_utils
+_transformers_import_utils.is_torchvision_available = lambda: False
+_transformers_import_utils._torchvision_available = False
 _transformers_import_utils.is_sklearn_available = lambda: False
 _transformers_import_utils._sklearn_available = False
 

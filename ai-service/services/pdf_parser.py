@@ -33,7 +33,7 @@ def extract_student_info(file_path: str) -> dict:
             try:
                 import fitz
                 import numpy as np
-                from services.ocr_service import get_paddle_ocr
+                from services.handwriting_ocr import get_ocr_engine as get_paddle_ocr
 
                 doc = fitz.open(file_path)
                 if len(doc) > 0:
