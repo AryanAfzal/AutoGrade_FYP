@@ -70,7 +70,8 @@ from services.text_cleaner import (
 
 # Device configuration (CUDA GPU if available, else CPU)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-USE_GPU_PADDLE = torch.cuda.is_available()
+USE_GPU_PADDLE = False
+ENABLE_TROCR = False  # Disabled on Free Tier (512MB RAM) to avoid OOM crashes (TrOCR alone takes 1.4GB)
 
 # Lazy-loaded singletons to prevent startup Out-Of-Memory on 512MB free tier
 _ocr_engine = None
@@ -82,25 +83,22 @@ def get_ocr_engine():
     if _ocr_engine is None:
         try:
             _ocr_engine = PaddleOCR(
-                use_angle_cls=True,
+                use_angle_cls=False,
                 lang="en",
-                use_gpu=USE_GPU_PADDLE,
+                use_gpu=False,
                 show_log=False,
-                det_limit_side_len=3000,
-                det_db_thresh=0.10,       # Sensitive threshold to capture light/thin handwriting
-                det_db_box_thresh=0.20,   # Keep faint handwritten boxes
-                det_db_unclip_ratio=2.0,  # Adequate margins for full character ascenders/descenders
+                det_limit_side_len=1500,
+                det_db_thresh=0.15,
+                det_db_box_thresh=0.25,
+                det_db_unclip_ratio=1.8,
             )
         except Exception as e:
-            print(f"PaddleOCR init fallback (retry without use_gpu): {e}")
+            print(f"PaddleOCR init fallback: {e}")
             _ocr_engine = PaddleOCR(
-                use_angle_cls=True,
+                use_angle_cls=False,
                 lang="en",
                 show_log=False,
-                det_limit_side_len=3000,
-                det_db_thresh=0.10,
-                det_db_box_thresh=0.20,
-                det_db_unclip_ratio=2.0,
+                det_limit_side_len=1500,
             )
     return _ocr_engine
 
@@ -211,9 +209,9 @@ def extract_text_from_image(image_path: str) -> list[dict]:
                 crops_to_infer.append(Image.fromarray(crop_np))
                 crop_indices.append(idx)
 
-    # Run batch inference for all queued crops at once
+    # Run batch inference for all queued crops at once (only when ENABLE_TROCR is true)
     recognition_started = time.perf_counter()
-    if crops_to_infer:
+    if crops_to_infer and ENABLE_TROCR:
         batch_size = 16
         for b_start in range(0, len(crops_to_infer), batch_size):
             b_crops = crops_to_infer[b_start : b_start + batch_size]

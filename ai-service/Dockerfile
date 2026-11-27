@@ -24,7 +24,6 @@ RUN python -m pip install --upgrade pip \
 COPY . .
 
 RUN python download_model.py \
-    && python download_trocr.py \
     && mkdir -p /app/backend/uploads /root/.paddleocr
 
 EXPOSE 8000
