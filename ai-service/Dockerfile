@@ -23,8 +23,7 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
-RUN python download_model.py \
-    && mkdir -p /app/backend/uploads /root/.paddleocr
+RUN mkdir -p /app/backend/uploads /root/.paddleocr
 
 EXPOSE 8000
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
