@@ -157,20 +157,6 @@ export class ExamsService {
     if (!exam) {
       throw new NotFoundException('Exam not found or you do not have permission to change its recheck deadline.');
     }
-    if (exam.recheckDeadline && new Date() > exam.recheckDeadline) {
-      const hasPublishedResults = await this.dataSource
-        .getRepository(StudentResult)
-        .findOne({
-          where: {
-            status: 'approved',
-            answerSheet: { exam: { id: exam.id } },
-          },
-          select: { id: true },
-        });
-      if (hasPublishedResults) {
-        throw new BadRequestException('The recheck deadline has already passed and cannot be extended.');
-      }
-    }
 
     const recheckDeadline = new Date(deadline);
     if (!Number.isFinite(recheckDeadline.getTime()) || recheckDeadline <= new Date()) {
