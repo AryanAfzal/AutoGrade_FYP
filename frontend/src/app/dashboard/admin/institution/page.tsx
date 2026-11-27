@@ -355,20 +355,20 @@ export default function InstitutionManagementPage() {
                       ? studentAssignments.filter((assignment) => assignment.studentId === user.id)
                       : [];
                     return (
-                      <div key={user.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#EEE8DC] px-4 py-3">
-                        <div className="min-w-48">
+                      <div key={user.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[#EEE8DC] px-4 py-3">
+                        <div className="w-full sm:min-w-48">
                           <p className="font-semibold">{user.fullName}</p>
                           <p className="text-xs text-[#777777]">{user.email}</p>
                           <p className="mt-1 text-xs text-[#777777]">Account: {user.status || 'APPROVED'}</p>
                         </div>
-                        <div className="flex min-w-56 flex-1 items-center justify-end gap-3">
+                        <div className="flex flex-wrap sm:flex-nowrap w-full sm:w-auto items-center justify-start sm:justify-end gap-3">
                           <span className="text-sm text-[#777777]">{departmentId ? 'Assigned to' : 'Not assigned'}</span>
                           <select
                             aria-label={`Department for ${user.fullName}`}
                             value={departmentId}
                             disabled={saving}
                             onChange={(event) => assignDepartment(user.id, event.target.value)}
-                            className="min-w-52 rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#005461] disabled:opacity-60"
+                            className="w-full sm:w-auto sm:min-w-52 rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#005461] disabled:opacity-60"
                           >
                             <option value="">No department</option>
                             {departments.filter((department) => department.active).map((department) => (
@@ -395,7 +395,7 @@ export default function InstitutionManagementPage() {
                                 value={studentSubjectDrafts[user.id] || ''}
                                 disabled={saving || !subjectOptions.length || user.status !== 'APPROVED'}
                                 onChange={(event) => setStudentSubjectDrafts((drafts) => ({ ...drafts, [user.id]: event.target.value }))}
-                                className="min-w-64 rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm disabled:opacity-60"
+                                className="w-full sm:w-auto sm:min-w-64 rounded-lg border border-[#CBD5E1] bg-white px-3 py-2 text-sm disabled:opacity-60"
                               >
                                 <option value="">Select a teacher and subject</option>
                                 {subjectOptions.map((option) => (

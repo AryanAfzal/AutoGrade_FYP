@@ -722,7 +722,7 @@ function AIReviewContent() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 min-w-[280px] md:w-96">
+        <div className="flex items-center gap-2 w-full md:w-96">
           <select
             id="exam-selector"
             value={examId || ''}
@@ -1260,7 +1260,7 @@ function AIReviewContent() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-3 gap-3 pt-4 border-t border-[#E8DCC8]">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-[#E8DCC8]">
                     {(() => {
                       const live = getLiveScore(selectedStudent);
                       return (
@@ -1486,7 +1486,7 @@ function AIReviewContent() {
                         </div>
                       ) : (
                         <>
-                          <div className="grid grid-cols-3 gap-2 text-xs border-t border-[#E8DCC8] pt-2">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs border-t border-[#E8DCC8] pt-2">
                             <div>
                               <p className="text-[#888888]">Keyword Score</p>
                               <p className="font-semibold text-[#1A1A1A]">{Math.round(entry.keywordScore * 100)}%</p>

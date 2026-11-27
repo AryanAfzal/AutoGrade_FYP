@@ -595,7 +595,7 @@ export default function CreateExamPage() {
               {expandedIndex === qIndex && (
                 <div className="mt-4 pt-4 border-t border-[#E8DCC8] space-y-4">
                   {/* Type + CLO + Marks */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-sm font-medium text-[#1A1A1A]">
                         Type

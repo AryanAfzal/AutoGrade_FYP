@@ -131,7 +131,7 @@ export default function TeacherDashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {quickActions.map(({ label, description, icon: Icon, href, color, iconColor }) => (
           <button
             key={href}

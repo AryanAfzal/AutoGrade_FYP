@@ -161,7 +161,7 @@ export default function LoginPage() {
         </p>
       </div>
 
-      <div className="login-form-panel relative w-full lg:w-1/2 flex items-center justify-center p-8">
+      <div className="login-form-panel relative w-full lg:w-1/2 flex items-center justify-center p-4 sm:p-6 md:p-8">
         <div className="login-content w-full max-w-md space-y-6">
           <div className="login-mobile-brand flex lg:hidden items-center gap-3 mb-4 pr-24">
             <div className="w-9 h-9 bg-[#005461] rounded-lg flex items-center justify-center">

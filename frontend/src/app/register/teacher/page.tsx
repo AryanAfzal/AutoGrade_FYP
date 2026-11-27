@@ -75,7 +75,7 @@ export default function TeacherRegistrationPage() {
 
   return (
     <div className="min-h-screen bg-[#FFF8EB] flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl bg-white border border-[#E8DCC8] rounded-2xl shadow-sm p-8 space-y-6">
+      <div className="w-full max-w-2xl bg-white border border-[#E8DCC8] rounded-2xl shadow-sm p-4 sm:p-6 md:p-8 space-y-6">
         <div className="flex items-center gap-3">
           <Image
             src="/favicon-round.png"

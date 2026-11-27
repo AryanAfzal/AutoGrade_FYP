@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Bell, Settings, LogOut, ChevronDown, UserCircle2 } from 'lucide-react';
+import { Bell, Settings, LogOut, ChevronDown, UserCircle2, Menu } from 'lucide-react';
 import { authApi, getStoredUser } from '@/lib/api';
 import type { User, UserNotification } from '@/types';
 import { cn } from '@/lib/utils';
@@ -49,6 +49,10 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     title: 'AI Review',
     subtitle: 'Review AI-evaluated results before publishing',
   },
+  '/dashboard/published-results': {
+    title: 'Published Results',
+    subtitle: 'View and manage student exam scores and analytics',
+  },
   '/dashboard/analytics': {
     title: 'Analytics',
     subtitle: 'Class performance, CLO attainment, and difficulty index',
@@ -66,7 +70,7 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 export default function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { collapsed } = useSidebar();
+  const { toggleMobileOpen } = useSidebar();
   const [user, setUser] = useState<User | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -140,23 +144,38 @@ export default function Topbar() {
   };
 
   return (
-    <header className="h-16 shrink-0 bg-white border-b border-[#E8DCC8] shadow-[0_4px_18px_rgba(15,23,42,0.04)] flex items-center justify-between px-8 z-30 w-full">
-      <div>
-        <h1 className="text-base font-semibold text-[#1A1A1A]">
-          {page.title}
-        </h1>
-        {page.subtitle && (
-          <p className="text-xs text-[#888888]">{page.subtitle}</p>
-        )}
+    <header className="h-16 shrink-0 bg-white border-b border-[#E8DCC8] shadow-[0_4px_18px_rgba(15,23,42,0.04)] flex items-center justify-between px-3 sm:px-6 md:px-8 z-30 w-full gap-2">
+      {/* Left Title & Mobile Menu Button */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={toggleMobileOpen}
+          aria-label="Open navigation menu"
+          className="md:hidden w-9 h-9 rounded-lg flex items-center justify-center text-[#005461] hover:bg-[#FFF8EB] active:scale-95 transition-all shrink-0 cursor-pointer"
+        >
+          <Menu size={22} />
+        </button>
+
+        <div className="min-w-0">
+          <h1 className="text-sm sm:text-base font-semibold text-[#1A1A1A] truncate">
+            {page.title}
+          </h1>
+          {page.subtitle && (
+            <p className="text-[11px] sm:text-xs text-[#888888] truncate hidden sm:block">
+              {page.subtitle}
+            </p>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* Right Controls & Profile */}
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         {/* Settings shortcut button */}
         <button
           type="button"
           onClick={() => router.push('/dashboard/profile')}
           title="Profile & Settings"
-          className="relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-[#FFF8EB] transition-colors cursor-pointer active:scale-95 text-[#005461]"
+          className="relative w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg hover:bg-[#FFF8EB] transition-colors cursor-pointer active:scale-95 text-[#005461]"
         >
           <Settings size={18} />
         </button>
@@ -168,7 +187,7 @@ export default function Topbar() {
             if (user?.role === 'student') router.push('/dashboard/student/results');
           }}
           title={user?.role === 'student' ? `${unreadNotifications} unread notifications` : 'Notifications'}
-          className="relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-[#FFF8EB] transition-colors cursor-pointer active:scale-95 text-[#005461]"
+          className="relative w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg hover:bg-[#FFF8EB] transition-colors cursor-pointer active:scale-95 text-[#005461]"
         >
           <Bell size={18} />
           {unreadNotifications > 0 && (
@@ -185,7 +204,7 @@ export default function Topbar() {
             onClick={() => setAccountMenuOpen((prev) => !prev)}
             aria-expanded={accountMenuOpen}
             aria-label="Account menu"
-            className="flex items-center gap-2.5 rounded-xl border border-[#E8DCC8] bg-[#FAF7F2] px-3 py-1.5 hover:border-[#005461] hover:bg-[#FFF8EB] transition-all cursor-pointer active:scale-95"
+            className="flex items-center gap-1.5 sm:gap-2.5 rounded-xl border border-[#E8DCC8] bg-[#FAF7F2] p-1 sm:px-3 sm:py-1.5 hover:border-[#005461] hover:bg-[#FFF8EB] transition-all cursor-pointer active:scale-95"
           >
             <div className="w-7 h-7 bg-[#005461] rounded-full flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
               {user?.profilePicture ? (
@@ -201,8 +220,8 @@ export default function Topbar() {
               )}
             </div>
             {user && (
-              <div className="hidden sm:block text-left">
-                <p className="text-xs font-semibold text-[#1A1A1A] leading-tight">
+              <div className="hidden md:block text-left">
+                <p className="text-xs font-semibold text-[#1A1A1A] leading-tight max-w-[120px] truncate">
                   {user.fullName}
                 </p>
                 <p className="text-[10px] text-[#888888] uppercase font-bold">
@@ -213,7 +232,7 @@ export default function Topbar() {
             <ChevronDown
               size={14}
               className={cn(
-                'text-[#888888] transition-transform duration-200',
+                'text-[#888888] transition-transform duration-200 hidden sm:block',
                 accountMenuOpen && 'rotate-180 text-[#005461]'
               )}
             />
@@ -221,7 +240,7 @@ export default function Topbar() {
 
           {/* Popdown Menu with Logout */}
           {accountMenuOpen && (
-            <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl bg-white border border-[#E8DCC8] shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className="absolute right-0 top-full mt-2 w-64 max-w-[90vw] rounded-2xl bg-white border border-[#E8DCC8] shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
               <div className="px-3 py-2.5 border-b border-[#F0E6D8] flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-[#005461] text-[#FAB963] font-bold flex items-center justify-center shrink-0 overflow-hidden shadow-sm">
                   {user?.profilePicture ? (

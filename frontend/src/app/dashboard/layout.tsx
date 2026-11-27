@@ -104,7 +104,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
         {/* Scrollable content pane - ONLY this area scrolls when user scrolls! */}
         <main className="flex-1 overflow-y-auto bg-[#FFF8EB]">
-          <div className="p-8 max-w-[1600px] mx-auto min-h-full">
+          <div className="p-3 sm:p-5 md:p-8 max-w-[1600px] mx-auto min-h-full">
             {children}
           </div>
         </main>
