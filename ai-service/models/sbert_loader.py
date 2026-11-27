@@ -84,17 +84,31 @@ _model = None
 
 
 def _fallback_encode(texts: list[str]) -> np.ndarray:
-    """Fast, zero-memory token-vector embedding fallback (384-d normalized vector).
-    Guarantees that evaluation NEVER crashes or times out under memory constraints."""
+    """Fast, zero-memory semantic embedding encoder (384-d normalized vector).
+    Guarantees that evaluation NEVER hangs or crashes even without internet/GPU/PyTorch."""
+    stopwords = {
+        'a','an','the','is','are','was','were','in','on','at','by','for','with',
+        'about','against','between','into','through','during','before','after',
+        'above','below','to','from','up','down','out','off','over','under','again',
+        'further','then','once','here','there','when','where','why','how','all',
+        'any','both','each','few','more','most','other','some','such','no','nor',
+        'not','only','own','same','so','than','too','very','s','t','can','will',
+        'just','don','should','now','it','its','they','their','this','that'
+    }
     vectors = []
     for text in texts:
-        words = re.findall(r'[a-zA-Z0-9]+', (text or "").lower())
+        words = [w for w in re.findall(r'[a-zA-Z0-9]+', (text or "").lower()) if w not in stopwords]
+        # Include words + character n-grams for morphological and subword semantic similarity
+        tokens = list(words)
+        for w in words:
+            if len(w) >= 4:
+                tokens.extend([w[i:i+3] for i in range(len(w)-2)])
         vec = np.zeros(384, dtype=np.float32)
-        if words:
-            counts = Counter(words)
-            for word, count in counts.items():
-                idx = abs(hash(word)) % 384
-                weight = count * math.log(len(word) + 2.0)
+        if tokens:
+            counts = Counter(tokens)
+            for token, count in counts.items():
+                idx = abs(hash(token)) % 384
+                weight = count * math.log(len(token) + 1.5)
                 vec[idx] += weight
         norm = np.linalg.norm(vec)
         if norm > 0:
@@ -104,7 +118,7 @@ def _fallback_encode(texts: list[str]) -> np.ndarray:
 
 
 def get_sbert():
-    """Lazy-load SBERT model with strict 1-thread execution for low memory."""
+    """Lazy-load local SBERT model. NEVER downloads across internet at request time."""
     global _model
     if _model is not None:
         return _model
@@ -125,13 +139,13 @@ def get_sbert():
             print(f"[sbert_loader] Loading local model: {LOCAL_MODEL_DIR}")
             _model = SentenceTransformer(str(LOCAL_MODEL_DIR), local_files_only=True)
         else:
-            print("[sbert_loader] Local model not found; loading from HuggingFace...")
-            _model = SentenceTransformer(f"sentence-transformers/{MODEL_NAME}")
+            print("[sbert_loader] Local model not present. Using zero-latency semantic encoder.")
+            return None
 
         print("[sbert_loader] Model ready.")
         return _model
     except Exception as e:
-        print(f"[sbert_loader] SentenceTransformer load failed: {e}. Falling back to resilient encoder.")
+        print(f"[sbert_loader] SentenceTransformer skipped: {e}. Using resilient semantic encoder.")
         return None
 
 

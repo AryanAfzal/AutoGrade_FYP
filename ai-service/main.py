@@ -50,7 +50,7 @@ app.include_router(similarity_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "ai-service", "version": "v2.2-pen-to-print"}
+    return {"status": "ok", "service": "ai-service", "version": "v3.0-ultra-fast"}
 
 @app.get("/test-sbert")
 def test_sbert():
