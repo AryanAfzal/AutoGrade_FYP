@@ -629,18 +629,7 @@ def extract_answers_from_sheet(
     expected_question_texts: Optional[list[str]] = None,
     ocr_engine: Literal["trocr", "pen_to_print"] = "trocr",
 ) -> list[dict]:
-    if ocr_engine == "pen_to_print":
-        try:
-            return _extract_answers_with_pen_to_print(
-                file_path,
-                expected_question_count=expected_question_count,
-                expected_question_texts=expected_question_texts,
-            )
-        except Exception as error:
-            raise RuntimeError(
-                f"Pen to Print OCR failed for {file_path}: {error}"
-            ) from error
-
+    # 1. Check if the PDF has a digital text layer first (instant, 0 memory)
     try:
         with pdfplumber.open(file_path) as pdf:
             full_text = "\n".join(
@@ -666,19 +655,29 @@ def extract_answers_from_sheet(
     if not use_handwriting_ocr:
         return text_answers
 
+    # 2. For handwritten papers, use the high-accuracy Pen to Print API.
+    # It consumes 0 MB of local neural network RAM, preventing 512MB Render free tier OOM crashes.
+    print(f"[pdf_parser] Using Pen to Print API for handwriting extraction on {file_path}")
     try:
-        ocr_answers = _extract_answers_with_handwriting_ocr(
+        return _extract_answers_with_pen_to_print(
             file_path,
             expected_question_count=expected_question_count,
             expected_question_texts=expected_question_texts,
         )
     except Exception as error:
-        raise RuntimeError(
-            f"Handwriting OCR failed for {file_path}: {error}"
-        ) from error
-
-    if not text_answers:
-        return ocr_answers
+        print(f"[pdf_parser] Pen to Print API failed: {error}. Falling back to local OCR...")
+        try:
+            return _extract_answers_with_handwriting_ocr(
+                file_path,
+                expected_question_count=expected_question_count,
+                expected_question_texts=expected_question_texts,
+            )
+        except Exception as ocr_err:
+            if text_answers:
+                return text_answers
+            raise RuntimeError(
+                f"Handwriting OCR failed for {file_path}: {error}; local fallback: {ocr_err}"
+            ) from error
 
     merged_answers = {
         answer["questionNumber"]: answer for answer in text_answers

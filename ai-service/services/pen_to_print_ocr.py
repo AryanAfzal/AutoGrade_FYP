@@ -10,8 +10,8 @@ PEN_TO_PRINT_ENDPOINT = "https://api.pen-to-print.com/V1/notes"
 
 
 def _get_credentials() -> tuple[str, str]:
-    user_id = (os.getenv("PEN_TO_PRINT_USER_ID") or "").strip()
-    secret = (os.getenv("PEN_TO_PRINT_SECRET") or "").strip()
+    user_id = (os.getenv("PEN_TO_PRINT_USER_ID") or "yKwGVHqGNnOsSCbfqGUz34P5pkt2").strip()
+    secret = (os.getenv("PEN_TO_PRINT_SECRET") or "39F9FCBA198").strip()
     if not user_id or not secret:
         raise RuntimeError(
             "Pen to Print credentials are not configured. "
