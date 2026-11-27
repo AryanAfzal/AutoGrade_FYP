@@ -56,40 +56,63 @@ export class UploadsService {
       let studentName = 'Unknown';
       let registrationNo = 'Unknown';
 
-      let fileBase64: string | undefined = undefined;
-      if (existsSync(absolutePath)) {
+      // 1. First, check if roll number is present in the filename (e.g. SP23-BCS-091.pdf)
+      const rollNumberFromFilename = extractRollNumberFromFilename(file.originalname);
+      let matchedStudent = null;
+      if (rollNumberFromFilename) {
+        registrationNo = rollNumberFromFilename;
         try {
-          fileBase64 = readFileSync(absolutePath).toString('base64');
-        } catch (readErr) {
-          this.logger.warn(`Could not read file ${absolutePath} as base64: ${readErr}`);
+          matchedStudent = await this.usersService.findByRollNumber(rollNumberFromFilename);
+          if (matchedStudent) {
+            studentName = matchedStudent.fullName;
+          }
+        } catch (findErr) {
+          this.logger.warn(`Could not lookup student by roll number ${rollNumberFromFilename}: ${findErr}`);
         }
       }
 
-      try {
-        const response = await axios.post(
-          `${process.env.AI_SERVICE_URL}/extract-student-info`,
-          {
-            filePath: absolutePath,
-            fileBase64,
-          },
-          { maxContentLength: Infinity, maxBodyLength: Infinity },
-        );
-        studentName = response.data.studentName || studentName;
-        registrationNo = response.data.registrationNo || registrationNo;
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          `Failed to extract student info from ${absolutePath}: ${message}`,
-        );
+      // 2. Only attempt AI service header extraction if student or registration is still unknown
+      if ((registrationNo === 'Unknown' || studentName === 'Unknown') && process.env.AI_SERVICE_URL) {
+        let fileBase64: string | undefined = undefined;
+        if (existsSync(absolutePath)) {
+          try {
+            fileBase64 = readFileSync(absolutePath).toString('base64');
+          } catch (readErr) {
+            this.logger.warn(`Could not read file ${absolutePath} as base64: ${readErr}`);
+          }
+        }
+
+        try {
+          const response = await axios.post(
+            `${process.env.AI_SERVICE_URL}/extract-student-info`,
+            {
+              filePath: absolutePath,
+              fileBase64,
+            },
+            {
+              timeout: 8000, // 8-second safety timeout: never hang uploads if AI service is sleeping
+              maxContentLength: Infinity,
+              maxBodyLength: Infinity,
+            },
+          );
+          studentName = response.data.studentName || studentName;
+          registrationNo = response.data.registrationNo || registrationNo;
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.warn(
+            `Failed to extract student info from ${absolutePath}: ${message}`,
+          );
+        }
       }
 
-      const rollNumberFromFilename = extractRollNumberFromFilename(file.originalname);
-      const resolvedRegistrationNo =
-        rollNumberFromFilename || registrationNo;
-      const matchedStudent =
-        resolvedRegistrationNo && resolvedRegistrationNo !== 'Unknown'
-          ? await this.usersService.findByRollNumber(resolvedRegistrationNo)
-          : null;
+      const resolvedRegistrationNo = rollNumberFromFilename || registrationNo;
+      if (!matchedStudent && resolvedRegistrationNo && resolvedRegistrationNo !== 'Unknown') {
+        try {
+          matchedStudent = await this.usersService.findByRollNumber(resolvedRegistrationNo);
+        } catch {
+          // ignore lookup failure
+        }
+      }
 
       const sheet = this.sheetRepo.create({
         exam:           { id: examId },
