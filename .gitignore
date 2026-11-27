@@ -61,3 +61,6 @@ ai-service/uploads/
 # Local AI service environment and downloaded model checkpoints
 ai-service/venv311/
 ai-service/model_files/
+
+*.sql
+
