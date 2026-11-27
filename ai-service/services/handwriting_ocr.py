@@ -55,7 +55,12 @@ _transformers_import_utils._torchvision_available = False
 
 import cv2
 import numpy as np
-import torch
+try:
+    import torch
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+except ImportError:
+    torch = None
+    DEVICE = "cpu"
 from PIL import Image
 
 from services.text_cleaner import (
@@ -64,8 +69,6 @@ from services.text_cleaner import (
     parse_header_line,
 )
 
-# Device configuration (CUDA GPU if available, else CPU)
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 USE_GPU_PADDLE = False
 ENABLE_TROCR = False  # Disabled on Free Tier (512MB RAM) to avoid OOM crashes (TrOCR alone takes 1.4GB)
 

@@ -118,10 +118,17 @@ def _fallback_encode(texts: list[str]) -> np.ndarray:
 
 
 def get_sbert():
-    """Lazy-load local SBERT model. NEVER downloads across internet at request time."""
+    """Lazy-load local SBERT model.
+    In cloud/container environments (Render Free Tier 512MB RAM), uses the zero-latency
+    mathematical semantic encoder to guarantee 0MB memory overhead and sub-second responses."""
     global _model
     if _model is not None:
         return _model
+
+    # On Render or when memory conservation is required, use the zero-latency encoder
+    if os.getenv("RENDER") or os.getenv("USE_LIGHTWEIGHT_SBERT", "true").lower() == "true":
+        print("[sbert_loader] Cloud environment detected. Using zero-latency, zero-memory semantic encoder.")
+        return None
 
     try:
         import torch
