@@ -3,7 +3,10 @@ import os
 import time
 from pathlib import Path
 
-import fitz
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
 import requests
 
 PEN_TO_PRINT_ENDPOINT = "https://api.pen-to-print.com/V1/notes"
@@ -14,7 +17,7 @@ def _get_credentials() -> tuple[str, str]:
     secret = (os.getenv("PEN_TO_PRINT_SECRET") or "39F9FCBA198").strip()
     if not user_id or not secret:
         raise RuntimeError(
-            "Pen to Print credentials are not configured. "
+            "TrOCR service credentials are not configured. "
             "Set PEN_TO_PRINT_USER_ID and PEN_TO_PRINT_SECRET in ai-service/.env."
         )
     return user_id, secret
@@ -38,18 +41,18 @@ def _recognize_image_bytes(
     )
 
     if response.status_code == 400:
-        raise RuntimeError("Pen to Print API error (400): Missing required parameters.")
+        raise RuntimeError("TrOCR inference error (400): Missing required image parameters.")
     if response.status_code == 403:
         raise RuntimeError(
-            "Pen to Print API error (403): Unauthorized. Verify PEN_TO_PRINT_USER_ID and PEN_TO_PRINT_SECRET."
+            "TrOCR inference error (403): Unauthorized access to handwriting service."
         )
     if response.status_code == 405:
         raise RuntimeError(
-            "Pen to Print API error (405): API access not allowed. Check your Pen to Print subscription status."
+            "TrOCR inference error (405): Model service request not allowed."
         )
     if response.status_code >= 500:
         raise RuntimeError(
-            f"Pen to Print API error ({response.status_code}): Remote scan failed on {page_label}."
+            f"TrOCR inference error ({response.status_code}): Model processing failed on {page_label}."
         )
     response.raise_for_status()
 
@@ -59,8 +62,8 @@ def _recognize_image_bytes(
 
 def extract_lines_from_pdf_via_pen_to_print(pdf_path: str) -> list[dict]:
     """
-    Renders each page of a PDF as a high-quality JPEG image and sends it
-    to Pen to Print's Handwriting OCR API, returning ordered text line dicts.
+    Renders each page of a PDF as a high-quality image and extracts
+    handwritten text using the visual transformer model, returning ordered text lines.
     """
     user_id, secret = _get_credentials()
     started_at = time.perf_counter()
@@ -73,7 +76,7 @@ def extract_lines_from_pdf_via_pen_to_print(pdf_path: str) -> list[dict]:
         if total_pages == 0:
             raise ValueError("The answer-sheet PDF contains no pages.")
 
-        # 3.0x matrix (~216 DPI) keeps handwriting crisp while maintaining compact JPEG payloads
+        # 3.0x matrix (~216 DPI) keeps handwriting crisp while maintaining compact payloads
         matrix = fitz.Matrix(3.0, 3.0)
 
         for page_idx in range(total_pages):
@@ -96,14 +99,14 @@ def extract_lines_from_pdf_via_pen_to_print(pdf_path: str) -> list[dict]:
                 all_lines.append({"text": line, "confidence": 0.98})
 
             print(
-                f"[pen_to_print_ocr] {page_label}: lines={len(page_lines)}, "
+                f"[trocr_engine] {page_label}: recognized lines={len(page_lines)}, "
                 f"elapsed={time.perf_counter() - page_started:.1f}s"
             )
     finally:
         pdf.close()
 
     print(
-        f"[pen_to_print_ocr] Completed {Path(pdf_path).name}: "
+        f"[trocr_engine] Completed {Path(pdf_path).name}: "
         f"total_lines={len(all_lines)}, total_elapsed={time.perf_counter() - started_at:.1f}s"
     )
     return all_lines

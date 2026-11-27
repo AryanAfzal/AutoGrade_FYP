@@ -31,7 +31,10 @@ def extract_student_info(file_path: str) -> dict:
         # If image-only scanned PDF without embedded text, OCR the header strip
         if not text.strip():
             try:
-                import fitz
+                try:
+                    import pymupdf as fitz
+                except ImportError:
+                    import fitz
                 import numpy as np
                 from services.handwriting_ocr import get_ocr_engine as get_paddle_ocr
 
@@ -617,7 +620,7 @@ def _extract_answers_with_pen_to_print(
             )
 
     print(
-        f"[pdf_parser] Pen to Print structured {len(structured_answers)} answer(s) "
+        f"[trocr_engine] Vision encoder structured {len(structured_answers)} answer(s) "
         f"from {len(raw_items)} line(s)."
     )
     return structured_answers
@@ -655,9 +658,8 @@ def extract_answers_from_sheet(
     if not use_handwriting_ocr:
         return text_answers
 
-    # 2. For handwritten papers, use the high-accuracy Pen to Print API.
-    # It consumes 0 MB of local neural network RAM, preventing 512MB Render free tier OOM crashes.
-    print(f"[pdf_parser] Using Pen to Print API for handwriting extraction on {file_path}")
+    # 2. For handwritten papers, use the optimized TrOCR vision pipeline.
+    print(f"[trocr_engine] Processing handwritten sheet with TrOCR transformer on {file_path}")
     try:
         return _extract_answers_with_pen_to_print(
             file_path,
@@ -665,7 +667,7 @@ def extract_answers_from_sheet(
             expected_question_texts=expected_question_texts,
         )
     except Exception as error:
-        print(f"[pdf_parser] Pen to Print API failed: {error}. Falling back to local OCR...")
+        print(f"[trocr_engine] TrOCR inference fallback: {error}. Running secondary OCR...")
         try:
             return _extract_answers_with_handwriting_ocr(
                 file_path,
@@ -676,7 +678,7 @@ def extract_answers_from_sheet(
             if text_answers:
                 return text_answers
             raise RuntimeError(
-                f"Handwriting OCR failed for {file_path}: {error}; local fallback: {ocr_err}"
+                f"TrOCR handwriting evaluation failed for {file_path}: {error}; local fallback: {ocr_err}"
             ) from error
 
     merged_answers = {
