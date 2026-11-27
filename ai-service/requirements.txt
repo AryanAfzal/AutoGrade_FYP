@@ -1,6 +1,5 @@
 # AI Service dependencies
-# The handwriting OCR dependencies follow the source project's PaddleOCR 2.x
-# pipeline. Use Python 3.10 or 3.11 as specified by that project.
+# SBERT evaluation + Pen to Print handwriting recognition pipeline
 
 fastapi==0.142.2
 uvicorn[standard]==0.54.0
@@ -10,12 +9,7 @@ sentence-transformers
 pdfplumber
 PyMuPDF==1.28.2
 Pillow==12.3.0
-opencv-python-headless==4.10.0.84
-paddleocr==2.9.1
-paddlepaddle==2.6.2
-torch>=2.0.0
-torchvision>=0.15.0
-transformers==5.15.0
+requests
 httpx
 pydantic
 numpy==1.26.4
