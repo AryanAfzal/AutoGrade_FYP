@@ -21,7 +21,7 @@ import { DecideRecheckRequestDto } from './dto/decide-recheck-request.dto';
 import { DecideSimilarityDto } from './dto/decide-similarity.dto';
 import { User } from '../users/entities/user.entity';
 import axios, { AxiosError, isAxiosError } from 'axios';
-import { createReadStream, existsSync, promises as fs } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, writeFileSync, mkdirSync, promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
 export interface EvaluationJobStartResult {
@@ -709,6 +709,15 @@ export class EvaluationService {
                     ? 'pen_to_print'
                     : 'trocr';
 
+        let fileBase64: string | undefined = undefined;
+        if (existsSync(sheet.filePath)) {
+          try {
+            fileBase64 = readFileSync(sheet.filePath).toString('base64');
+          } catch (readErr) {
+            this.logger.warn(`Could not read sheet file ${sheet.filePath} as base64: ${readErr}`);
+          }
+        }
+
         const omrOutputPath =
           resolvedEngine === 'omr'
             ? path.resolve(process.cwd(), 'uploads', 'omr-annotated', `${sheet.id}.png`)
@@ -719,15 +728,25 @@ export class EvaluationService {
           {
             answersheetId: sheet.id,
             filePath: sheet.filePath,
+            fileBase64,
             examId: exam.id,
             questions: exam.questions,
             ocrEngine: resolvedEngine,
             ...(omrOutputPath ? { omrOutputPath } : {}),
           },
-          { timeout: 300000 },
+          { timeout: 300000, maxContentLength: Infinity, maxBodyLength: Infinity },
         );
 
-        const { totalMark, totalMaxMarks, omrAnnotatedPath, entries } = aiResponse.data;
+        const { totalMark, totalMaxMarks, entries, omrAnnotatedBase64 } = aiResponse.data;
+        if (omrAnnotatedBase64 && omrOutputPath) {
+          try {
+            mkdirSync(path.dirname(omrOutputPath), { recursive: true });
+            writeFileSync(omrOutputPath, Buffer.from(omrAnnotatedBase64, 'base64'));
+          } catch (writeErr) {
+            this.logger.warn(`Could not save omr annotated image locally: ${writeErr}`);
+          }
+        }
+
         const result = this.resultRepo.create({
           answerSheet: sheet,
           totalAiMark: totalMark,
@@ -738,7 +757,7 @@ export class EvaluationService {
         await this.resultRepo.save(result);
         await this.sheetRepo.update(sheet.id, {
           status: 'awaiting_approval',
-          ...(omrAnnotatedPath ? { omrAnnotatedPath } : {}),
+          ...(omrOutputPath ? { omrAnnotatedPath: omrOutputPath } : {}),
         });
 
         this.logger.log(

@@ -5,7 +5,7 @@ import { AnswerSheet } from './entities/answer-sheet.entity';
 import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { StudentResult } from '../evaluation/entities/student-result.entity';
@@ -56,10 +56,23 @@ export class UploadsService {
       let studentName = 'Unknown';
       let registrationNo = 'Unknown';
 
+      let fileBase64: string | undefined = undefined;
+      if (existsSync(absolutePath)) {
+        try {
+          fileBase64 = readFileSync(absolutePath).toString('base64');
+        } catch (readErr) {
+          this.logger.warn(`Could not read file ${absolutePath} as base64: ${readErr}`);
+        }
+      }
+
       try {
         const response = await axios.post(
           `${process.env.AI_SERVICE_URL}/extract-student-info`,
-          { filePath: absolutePath },
+          {
+            filePath: absolutePath,
+            fileBase64,
+          },
+          { maxContentLength: Infinity, maxBodyLength: Infinity },
         );
         studentName = response.data.studentName || studentName;
         registrationNo = response.data.registrationNo || registrationNo;
