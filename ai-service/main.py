@@ -50,7 +50,28 @@ app.include_router(similarity_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "ai-service", "version": "v2.1-pen-to-print"}
+    return {"status": "ok", "service": "ai-service", "version": "v2.2-pen-to-print"}
+
+@app.get("/test-sbert")
+def test_sbert():
+    import time
+    t0 = time.time()
+    try:
+        from models.sbert_loader import encode
+        emb = encode(["Hello world", "Test sentence"])
+        return {
+            "status": "success",
+            "shape": list(emb.shape),
+            "elapsed": round(time.time() - t0, 2),
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "elapsed": round(time.time() - t0, 2),
+        }
 
 if __name__ == "__main__":
     import uvicorn
