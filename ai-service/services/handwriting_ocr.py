@@ -50,17 +50,13 @@ import transformers.utils.import_utils as _transformers_import_utils
 
 _transformers_import_utils.is_sklearn_available = lambda: False
 _transformers_import_utils._sklearn_available = False
+_transformers_import_utils.is_torchvision_available = lambda: False
+_transformers_import_utils._torchvision_available = False
 
 import cv2
 import numpy as np
 import torch
-from paddleocr import PaddleOCR
 from PIL import Image
-from transformers import (
-    RobertaTokenizer,
-    VisionEncoderDecoderModel,
-    ViTImageProcessor,
-)
 
 from services.text_cleaner import (
     is_watermark_or_noise,
@@ -82,6 +78,7 @@ def get_ocr_engine():
     global _ocr_engine
     if _ocr_engine is None:
         try:
+            from paddleocr import PaddleOCR
             _ocr_engine = PaddleOCR(
                 use_angle_cls=False,
                 lang="en",
@@ -130,6 +127,12 @@ def get_trocr():
     MODEL_SRC = str(LOCAL_MODEL_DIR)
 
     print(f"Loading official Base TrOCR on-demand from local folder '{MODEL_SRC}'...")
+    from transformers import (
+        RobertaTokenizer,
+        VisionEncoderDecoderModel,
+        ViTImageProcessor,
+    )
+
     image_processor = ViTImageProcessor.from_pretrained(
         MODEL_SRC, local_files_only=True
     )
